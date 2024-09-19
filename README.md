@@ -45,7 +45,7 @@ print(matches)
 # ]
 ```
 
-<summary><h2>Extra Notes</h2></summary>
+<h2>Extra Notes</h2>
 <details>
 
 ### Developer-Author-EM Dataset
