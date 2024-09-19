@@ -1,28 +1,27 @@
 #!/usr/bin/env python
 
-from pathlib import Path
-from dataclasses import dataclass
-import time
-
-from dataclasses_json import DataClassJsonMixin
 import os
 import random
 import shutil
+import time
+from dataclasses import dataclass
 from itertools import combinations
+from pathlib import Path
+
 import datasets
 import numpy as np
 import pandas as pd
 from autotrain.trainers.text_classification.__main__ import train as ft_train
+from dataclasses_json import DataClassJsonMixin
 from dotenv import load_dotenv
-from tabulate import tabulate
-from tqdm import tqdm
-from transformers import pipeline, Pipeline
 from sklearn.metrics import (
+    ConfusionMatrixDisplay,
     accuracy_score,
     precision_recall_fscore_support,
-    ConfusionMatrixDisplay,
 )
-from dotenv import load_dotenv
+from tabulate import tabulate
+from tqdm import tqdm
+from transformers import Pipeline, pipeline
 
 from .data import (
     load_annotated_dev_author_em_dataset,
@@ -83,10 +82,11 @@ MODEL_STR_INPUT_TEMPLATE = """
 ---
 
 <author-details>\n\t<name>{author_name}</name>{author_extras}\n</author-details>
-""".strip()  # noqa: E501
+""".strip()
 
 
 ###############################################################################
+
 
 @dataclass
 class EvaluationResults(DataClassJsonMixin):
@@ -97,6 +97,7 @@ class EvaluationResults(DataClassJsonMixin):
     recall: float
     f1: float
     time_pred: float
+
 
 def evaluate(
     model: Pipeline,
@@ -186,7 +187,7 @@ def evaluate(
     )
 
 
-def run() -> None:
+def run() -> None:  # noqa: C901
     # Load environment variables
     load_dotenv()
     FINE_TUNE_COMMAND_DICT["token"] = os.environ["HF_AUTH_TOKEN"]
@@ -308,7 +309,7 @@ def run() -> None:
             # Always prepend with new line and tab
             if len(dev_extras_str) > 0:
                 dev_extras_str = "\n\t" + dev_extras_str
-            
+
             # Construct author extras
             author_extras = []
             for field in fieldset:
@@ -355,7 +356,7 @@ def run() -> None:
                 preserve_index=False,
             ),
         )
-    
+
     # Create a dataframe where the rows are the different splits
     # and there are three columns one column is the split name,
     # the other columns are the counts of match

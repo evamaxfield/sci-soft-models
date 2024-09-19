@@ -13,4 +13,4 @@ MODEL_STR_INPUT_TEMPLATE = """
 <author-details>
     <name>{author_name}</name>
 </author-details>
-""".strip()  # noqa: E501
+""".strip()

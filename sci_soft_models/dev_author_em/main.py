@@ -4,15 +4,16 @@ import logging
 from dataclasses import dataclass
 
 from dataclasses_json import DataClassJsonMixin
-from transformers import pipeline, Pipeline
+from transformers import Pipeline, pipeline
 
-from .constants import TRAINED_UPLOADED_MODEL_NAME, MODEL_STR_INPUT_TEMPLATE
+from .constants import MODEL_STR_INPUT_TEMPLATE, TRAINED_UPLOADED_MODEL_NAME
 
 ###############################################################################
 
 log = logging.getLogger(__name__)
 
 ###############################################################################
+
 
 @dataclass
 class DeveloperDetails(DataClassJsonMixin):
@@ -26,6 +27,7 @@ class MatchedDevAuthor(DataClassJsonMixin):
     dev: DeveloperDetails
     author: str
     confidence: float
+
 
 ###############################################################################
 
@@ -74,7 +76,7 @@ def match_devs_and_authors(
         clf = loaded_dev_author_em_model
 
     # Create xarray for filled templates
-    inputs = []
+    inputs: list[dict[str, str | DeveloperDetails]] = []
     for dev in devs:
         for author in authors:
             inputs.append(
@@ -87,23 +89,32 @@ def match_devs_and_authors(
                         dev_name=dev.name,
                         dev_email=dev.email,
                         author_name=author,
-                    )
+                    ),
                 }
             )
 
     # Predict the matches
     log.debug("Predicting matches")
-    outputs = clf([input_["text"] for input_ in inputs])
-    
+    outputs: list[dict[str, str | float]] = clf([input_["text"] for input_ in inputs])
+
     # Extract the matches
     matches = []
-    for input_, output_ in zip(inputs, outputs):
-        if output_["label"] == "match":
+    for input_, output_ in zip(inputs, outputs, strict=True):
+        # Unpack output
+        output_label = output_["label"]
+        output_score = output_["score"]
+
+        # Assert to make types happy
+        assert isinstance(output_label, str)
+        assert isinstance(output_score, float)
+        assert isinstance(input_["dev_details"], DeveloperDetails)
+
+        if output_label == "match":
             matches.append(
                 MatchedDevAuthor(
                     dev=input_["dev_details"],
                     author=input_["author"],
-                    confidence=output_["score"],
+                    confidence=output_score,
                 )
             )
 

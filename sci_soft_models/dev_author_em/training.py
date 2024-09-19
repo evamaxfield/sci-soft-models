@@ -2,26 +2,17 @@
 
 import os
 import random
-import datasets
 from pathlib import Path
+
+import datasets
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from transformers import pipeline
 from sklearn.metrics import (
+    ConfusionMatrixDisplay,
     accuracy_score,
     precision_recall_fscore_support,
-    ConfusionMatrixDisplay,
 )
-from dotenv import load_dotenv
-
-from .data import (
-    load_annotated_dev_author_em_dataset,
-    load_author_contributors_dataset,
-    load_developer_contributors_dataset,
-)
-
-import datasets
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -32,6 +23,11 @@ from transformers import (
 )
 
 from .constants import MODEL_STR_INPUT_TEMPLATE, TRAINED_UPLOADED_MODEL_NAME
+from .data import (
+    load_annotated_dev_author_em_dataset,
+    load_author_contributors_dataset,
+    load_developer_contributors_dataset,
+)
 
 ###############################################################################
 
@@ -54,7 +50,7 @@ def run(
 
     # Check that HF_AUTH_TOKEN is set
     if "HF_AUTH_TOKEN" not in os.environ:
-        raise EnvironmentError("HF_AUTH_TOKEN is not set in the environment")
+        raise OSError("HF_AUTH_TOKEN is not set in the environment")
 
     # Set seed
     random.seed(12)
@@ -252,7 +248,7 @@ def run(
         train_dataset=tokenized_ds_dict["train"],
         tokenizer=tokenizer,
         data_collator=data_collator,
-    )    
+    )
 
     print("Training model...")
 
