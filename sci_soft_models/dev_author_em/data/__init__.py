@@ -105,9 +105,9 @@ def load_author_contributors_dataset() -> pd.DataFrame:
             )
 
     # Convert to dataframe
-    all_author_details_df = pd.DataFrame([
-        author_contrib.to_dict() for author_contrib in author_contributions
-    ])
+    all_author_details_df = pd.DataFrame(
+        [author_contrib.to_dict() for author_contrib in author_contributions]
+    )
     return all_author_details_df
 
 
