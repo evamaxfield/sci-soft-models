@@ -6,6 +6,7 @@ from dataclasses_json import DataClassJsonMixin
 
 ###############################################################################
 
+
 @dataclass
 class ModelDetails(DataClassJsonMixin):
     name: str
