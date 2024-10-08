@@ -3,6 +3,7 @@
 from .main import (
     DeveloperDetails,
     MatchedDevAuthor,
+    get_model_details,
     load_dev_author_em_model,
     match_devs_and_authors,
 )
@@ -12,4 +13,5 @@ __all__ = [
     "MatchedDevAuthor",
     "load_dev_author_em_model",
     "match_devs_and_authors",
+    "get_model_details",
 ]
