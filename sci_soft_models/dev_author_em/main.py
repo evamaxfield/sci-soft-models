@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from dataclasses_json import DataClassJsonMixin
 from transformers import Pipeline, pipeline
 
+from .. import __version__
+from ..types import ModelDetails
 from .constants import MODEL_STR_INPUT_TEMPLATE, TRAINED_UPLOADED_MODEL_NAME
 
 ###############################################################################
@@ -30,6 +32,18 @@ class MatchedDevAuthor(DataClassJsonMixin):
 
 
 ###############################################################################
+
+
+def get_model_details() -> ModelDetails:
+    """
+    Get the name and version of the model.
+
+    Returns
+    -------
+    ModelDetails
+        The name and version of the model.
+    """
+    return ModelDetails(name=__name__, version=__version__)
 
 
 def load_dev_author_em_model() -> Pipeline:
