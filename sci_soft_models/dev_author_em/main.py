@@ -3,6 +3,7 @@
 import logging
 from dataclasses import dataclass
 
+import torch
 from dataclasses_json import DataClassJsonMixin
 from transformers import Pipeline, pipeline
 
@@ -46,22 +47,43 @@ def get_model_details() -> ModelDetails:
     return ModelDetails(name=__name__, version=__version__)
 
 
-def load_dev_author_em_model() -> Pipeline:
+def load_dev_author_em_model(use_available_device: bool | str = True) -> Pipeline:
     """
     Load the author-dev EM model.
+
+    Parameters
+    ----------
+    use_available_device: bool | str | int
+        Whether to use the available device, by default True
+        Can pass a string for a specific device to use.
 
     Returns
     -------
     Pipeline
         The author-dev EM model.
     """
-    return pipeline("text-classification", model=TRAINED_UPLOADED_MODEL_NAME)
+    # Check for device
+    if isinstance(use_available_device, str):
+        device = use_available_device
+    elif torch.cuda.is_available():
+        device = "cuda:0"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+
+    return pipeline(
+        "text-classification",
+        model=TRAINED_UPLOADED_MODEL_NAME,
+        device=device,
+    )
 
 
 def match_devs_and_authors(
     devs: list[DeveloperDetails],
     authors: list[str],
     loaded_dev_author_em_model: Pipeline | None = None,
+    use_available_device: bool | str = True,
 ) -> list[MatchedDevAuthor]:
     """
     Embed developers and authors and predict matches.
@@ -77,6 +99,9 @@ def match_devs_and_authors(
         The authors to embed.
     loaded_dev_author_em_model: Pipeline, optional
         The loaded author EM model, by default None
+    use_available_device: bool | str
+        Whether to use the available device, by default True
+        Can pass a string for a specific device to use.
 
     Returns
     -------
@@ -85,7 +110,7 @@ def match_devs_and_authors(
     """
     # If no loaded classifer, load the model
     if loaded_dev_author_em_model is None:
-        clf = load_dev_author_em_model()
+        clf = load_dev_author_em_model(use_available_device=use_available_device)
     else:
         clf = loaded_dev_author_em_model
 
