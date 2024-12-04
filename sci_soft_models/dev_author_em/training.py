@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
+import json
 import os
 import random
+import shutil
 from pathlib import Path
 
 import datasets
@@ -24,6 +26,7 @@ from transformers import (
 
 from .constants import MODEL_STR_INPUT_TEMPLATE, TRAINED_UPLOADED_MODEL_NAME
 from .data import (
+    FINAL_MODEL_TRAINING_DATA_DIR,
     load_annotated_dev_author_em_dataset,
     load_author_contributors_dataset,
     load_developer_contributors_dataset,
@@ -31,17 +34,13 @@ from .data import (
 
 ###############################################################################
 
-_CURRENT_DIR = Path(__file__).parent
-DEFAULT_MODEL_EVAL_OUTPUTS_DIR = _CURRENT_DIR / "official-model-eval-results"
-
-###############################################################################
-
 
 def run(
     base_model_name: str = "microsoft/deberta-v3-base",
+    num_training_epochs: int = 1,
     test_size: float = 0.1,
     model_name: str = TRAINED_UPLOADED_MODEL_NAME,
-    model_eval_outputs_dir: Path = DEFAULT_MODEL_EVAL_OUTPUTS_DIR,
+    model_eval_outputs_dir: Path = FINAL_MODEL_TRAINING_DATA_DIR,
     confusion_matrix_save_name: str = "dev-author-em-confusion-matrix.png",
     misclassifications_save_name: str = "dev-author-em-misclassifications.csv",
 ) -> None:
@@ -55,6 +54,13 @@ def run(
     # Set seed
     random.seed(12)
     np.random.seed(12)
+
+    # Clear old model eval outputs
+    if model_eval_outputs_dir.exists():
+        shutil.rmtree(model_eval_outputs_dir)
+
+    # Remake the model eval outputs dir
+    model_eval_outputs_dir.mkdir(exist_ok=True, parents=True)
 
     # Load the datasets
     dev_author_full_details = load_annotated_dev_author_em_dataset()
@@ -157,6 +163,13 @@ def run(
     train_df = pd.DataFrame(train_rows)
     test_df = pd.DataFrame(test_rows)
 
+    # Make the outputs dir
+    model_eval_outputs_dir.mkdir(exist_ok=True, parents=True)
+
+    # Store the train and test datasets
+    train_df.to_parquet(model_eval_outputs_dir / "train-set.parquet")
+    test_df.to_parquet(model_eval_outputs_dir / "test-set.parquet")
+
     # Print input example
     print("Example input:")
     print(train_df.iloc[0]["text"])
@@ -179,6 +192,9 @@ def run(
     print("Split counts:")
     print(split_counts_df)
     print()
+
+    # Store the split counts summary table
+    split_counts_df.to_parquet(model_eval_outputs_dir / "split-counts.parquet")
 
     # Get n classes and labels
     num_classes = matched_details_df["label"].nunique()
@@ -236,7 +252,7 @@ def run(
     training_args = TrainingArguments(
         output_dir="dev-author-em-clf",
         overwrite_output_dir=True,
-        num_train_epochs=1,
+        num_train_epochs=num_training_epochs,
         learning_rate=1e-5,
         logging_steps=10,
         auto_find_batch_size=True,
@@ -282,8 +298,16 @@ def run(
         f"F1: {f1:.3f}"
     )
 
-    # Make the outputs dir
-    model_eval_outputs_dir.mkdir(exist_ok=True, parents=True)
+    # Store results to JSON
+    results = {
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+    }
+    results_save_path = model_eval_outputs_dir / "results.json"
+    with open(results_save_path, "w") as open_f:
+        json.dump(results, open_f)
 
     # Create confusion matrix and ROC curve
     confusion_matrix = ConfusionMatrixDisplay.from_predictions(
