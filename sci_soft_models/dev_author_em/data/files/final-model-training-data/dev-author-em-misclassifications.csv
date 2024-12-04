@@ -1,0 +1,89 @@
+text,label,predicted
+"<developer-details>
+    <username>Beauprel</username>
+    <name>Alexis BL</name>
+    <email>None</email>
+</developer-details>
+
+---
+
+<author-details>
+    <name>Alexis Beaupré Laperrière</name>
+</author-details>",match,no-match
+"<developer-details>
+    <username>jcushman</username>
+    <name>Jack Cushman</name>
+    <email>jcushman@gmail.com</email>
+</developer-details>
+
+---
+
+<author-details>
+    <name>John P. Cushman</name>
+</author-details>",no-match,match
+"<developer-details>
+    <username>mbdemoraes</username>
+    <name>None</name>
+    <email>None</email>
+</developer-details>
+
+---
+
+<author-details>
+    <name>M. B. D. Moraes</name>
+</author-details>",match,no-match
+"<developer-details>
+    <username>giovannic</username>
+    <name>Giovanni</name>
+    <email>None</email>
+</developer-details>
+
+---
+
+<author-details>
+    <name>G. Charles</name>
+</author-details>",match,no-match
+"<developer-details>
+    <username>Jammy2211</username>
+    <name>James Nightingale</name>
+    <email>james.w.nightingale@durham.ac.uk</email>
+</developer-details>
+
+---
+
+<author-details>
+    <name>J. Nightingale</name>
+</author-details>",no-match,match
+"<developer-details>
+    <username>oekosheri</username>
+    <name>Sherri Hadian</name>
+    <email>shrewdinka@gmail.com</email>
+</developer-details>
+
+---
+
+<author-details>
+    <name>R. Hadian</name>
+</author-details>",no-match,match
+"<developer-details>
+    <username>aladics</username>
+    <name>None</name>
+    <email>None</email>
+</developer-details>
+
+---
+
+<author-details>
+    <name>Tamás Aladics</name>
+</author-details>",no-match,match
+"<developer-details>
+    <username>kortschak</username>
+    <name>Dan Kortschak</name>
+    <email>None</email>
+</developer-details>
+
+---
+
+<author-details>
+    <name>R. Kortschak</name>
+</author-details>",no-match,match

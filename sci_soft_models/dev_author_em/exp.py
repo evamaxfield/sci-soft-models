@@ -24,6 +24,7 @@ from tqdm import tqdm
 from transformers import Pipeline, pipeline
 
 from .data import (
+    EXP_FILES_DIR,
     load_annotated_dev_author_em_dataset,
     load_author_contributors_dataset,
     load_developer_contributors_dataset,
@@ -59,13 +60,14 @@ DEFAULT_HF_DATASET_PATH = "evamxb/dev-author-em-dataset"
 _CURRENT_DIR = Path(__file__).parent
 DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH = Path("autotrain-text-classification-temp/")
 DEFAULT_MODEL_MAX_SEQ_LENGTH = 256
+EPOCH_VALUES = [1, 2]
 FINE_TUNE_COMMAND_DICT = {
     "data_path": DEFAULT_HF_DATASET_PATH,
     "project_name": str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
     "text_column": "text",
     "target_column": "label",
     "train_split": "train",
-    "epochs": 1,
+    # "epochs": 1,
     "lr": 1e-5,
     "auto_find_batch_size": True,
     "seed": 12,
@@ -84,6 +86,7 @@ MODEL_STR_INPUT_TEMPLATE = """
 <author-details>\n\t<name>{author_name}</name>{author_extras}\n</author-details>
 """.strip()
 
+TRAINING_RESULTS_STORAGE_PATH = EXP_FILES_DIR / "exp-training-results.csv"
 
 ###############################################################################
 
@@ -92,6 +95,7 @@ MODEL_STR_INPUT_TEMPLATE = """
 class EvaluationResults(DataClassJsonMixin):
     fieldset: str
     model: str
+    epoch_val: int
     accuracy: float
     precision: float
     recall: float
@@ -101,15 +105,18 @@ class EvaluationResults(DataClassJsonMixin):
 
 def evaluate(
     model: Pipeline,
-    x_test: list[np.ndarray] | list[str],
-    y_test: list[str],
-    model_name: str,
-    df: pd.DataFrame,
+    test_df: pd.DataFrame,
     fieldset: str,
+    model_name: str,
+    epoch_val: int,
     eval_storage_path: Path,
 ) -> EvaluationResults:
     # Evaluate the model
     print("Evaluating model")
+
+    # Unpack test set
+    x_test = test_df["text"].tolist()
+    y_test = test_df["label"].tolist()
 
     # Recore perf time
     start_time = time.time()
@@ -155,6 +162,10 @@ def evaluate(
     this_model_eval_storage = this_model_eval_storage / model_name
     this_model_eval_storage.mkdir(exist_ok=True)
 
+    # Epoch value
+    this_model_eval_storage = this_model_eval_storage / f"epochs-{epoch_val}"
+    this_model_eval_storage.mkdir(exist_ok=True)
+
     # Create confusion matrix display
     cm = ConfusionMatrixDisplay.from_predictions(
         y_test,
@@ -165,10 +176,10 @@ def evaluate(
     cm.figure_.savefig(this_model_eval_storage / "confusion.png")
 
     # Add a "predicted" column
-    df["predicted"] = y_pred
+    test_df["predicted"] = y_pred
 
     # Find rows of misclassifications
-    misclassifications = df[df["label"] != df["predicted"]]
+    misclassifications = test_df[test_df["label"] != test_df["predicted"]]
 
     # Save misclassifications
     misclassifications.to_csv(
@@ -179,6 +190,7 @@ def evaluate(
     return EvaluationResults(
         fieldset=fieldset,
         model=model_name,
+        epoch_val=epoch_val,
         accuracy=accuracy,
         precision=precision,
         recall=recall,
@@ -187,7 +199,9 @@ def evaluate(
     )
 
 
-def run() -> None:  # noqa: C901
+def run(  # noqa: C901
+    results_output_path: Path = TRAINING_RESULTS_STORAGE_PATH,
+) -> None:
     # Load environment variables
     load_dotenv()
     FINE_TUNE_COMMAND_DICT["token"] = os.environ["HF_AUTH_TOKEN"]
@@ -195,6 +209,10 @@ def run() -> None:  # noqa: C901
     # Delete prior results and then remake
     shutil.rmtree(EVAL_STORAGE_PATH, ignore_errors=True)
     EVAL_STORAGE_PATH.mkdir(exist_ok=True)
+
+    # Delete prior results and then remake
+    shutil.rmtree(EXP_FILES_DIR, ignore_errors=True)
+    EXP_FILES_DIR.mkdir(exist_ok=True)
 
     # Set seed
     np.random.seed(12)
@@ -442,57 +460,68 @@ def run() -> None:  # noqa: C901
                 desc="Fine-tune models",
                 leave=False,
             ):
-                # Set seed
-                np.random.seed(12)
-                random.seed(12)
+                # Iter through epochs
+                for epoch_val in tqdm(
+                    EPOCH_VALUES,
+                    desc="Multiple Epochs Testing",
+                    leave=False,
+                ):
+                    # Set seed
+                    np.random.seed(12)
+                    random.seed(12)
 
-                print()
-                print(f"Working on: {model_short_name}")
-                try:
-                    # Delete existing temp storage if exists
-                    if DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH.exists():
-                        shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
+                    print()
+                    print(f"Working on: {model_short_name}")
+                    try:
+                        # Delete existing temp storage if exists
+                        if DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH.exists():
+                            shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
 
-                    # Update the fine-tune command dict
-                    this_iter_command_dict = FINE_TUNE_COMMAND_DICT.copy()
-                    this_iter_command_dict["model"] = hf_model_path
+                        # Update the fine-tune command dict
+                        this_iter_command_dict = FINE_TUNE_COMMAND_DICT.copy()
+                        this_iter_command_dict["model"] = hf_model_path
+                        this_iter_command_dict["epochs"] = epoch_val
 
-                    # Train the model
-                    ft_train(
-                        this_iter_command_dict,
-                    )
+                        # Train the model
+                        ft_train(
+                            this_iter_command_dict,
+                        )
 
-                    # Evaluate the model
-                    ft_transformer_pipe = pipeline(
-                        task="text-classification",
-                        model=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
-                        tokenizer=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
-                        padding=True,
-                        truncation=True,
-                        max_length=DEFAULT_MODEL_MAX_SEQ_LENGTH,
-                    )
-                    results.append(
-                        evaluate(
-                            ft_transformer_pipe,
-                            fieldset_test_df["text"].tolist(),
-                            fieldset_test_df["label"].tolist(),
-                            model_short_name,
-                            fieldset_test_df,
-                            "-".join(fieldset),
-                            eval_storage_path=EVAL_STORAGE_PATH,
-                        ).to_dict(),
-                    )
+                        # Evaluate the model
+                        ft_transformer_pipe = pipeline(
+                            task="text-classification",
+                            model=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
+                            tokenizer=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
+                            padding=True,
+                            truncation=True,
+                            max_length=DEFAULT_MODEL_MAX_SEQ_LENGTH,
+                        )
 
-                except Exception as e:
-                    print(f"Error during: {model_short_name}, Error: {e}")
-                    results.append(
-                        {
-                            "fieldset": fieldset,
-                            "model": model_short_name,
-                            "error_level": "fine-tune model training",
-                            "error": str(e),
-                        }
-                    )
+                        # Handle empty fieldset
+                        if len(fieldset) == 0:
+                            fieldset = ["no-optional-data"]
+
+                        results.append(
+                            evaluate(
+                                model=ft_transformer_pipe,
+                                test_df=fieldset_test_df.copy(),
+                                fieldset="-".join(fieldset),
+                                model_name=model_short_name,
+                                epoch_val=epoch_val,
+                                eval_storage_path=EVAL_STORAGE_PATH,
+                            ).to_dict(),
+                        )
+
+                    except Exception as e:
+                        print(f"Error during: {model_short_name}, Error: {e}")
+                        results.append(
+                            {
+                                "fieldset": fieldset,
+                                "model": model_short_name,
+                                "error_level": "fine-tune model training",
+                                "error": str(e),
+                            }
+                        )
 
         except Exception as e:
             print(f"Error during: {fieldset}, Error: {e}")
@@ -511,7 +540,7 @@ def run() -> None:  # noqa: C901
         results_df = results_df.sort_values(by="f1", ascending=False).reset_index(
             drop=True
         )
-        results_df.to_csv("all-model-results.csv", index=False)
+        results_df.to_csv(results_output_path, index=False)
         print("Current standings")
         print(
             tabulate(
@@ -531,7 +560,7 @@ def run() -> None:  # noqa: C901
     # Print results
     results_df = pd.DataFrame(results)
     results_df = results_df.sort_values(by="f1", ascending=False).reset_index(drop=True)
-    results_df.to_csv("all-model-results.csv", index=False)
+    results_df.to_csv(results_output_path, index=False)
     print("Final standings")
     print(
         tabulate(
@@ -541,3 +570,6 @@ def run() -> None:  # noqa: C901
             showindex=False,
         )
     )
+
+    # Save results
+    results_df.to_csv(results_output_path, index=False)
