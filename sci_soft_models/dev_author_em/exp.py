@@ -60,7 +60,7 @@ DEFAULT_HF_DATASET_PATH = "evamxb/dev-author-em-dataset"
 _CURRENT_DIR = Path(__file__).parent
 DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH = Path("autotrain-text-classification-temp/")
 DEFAULT_MODEL_MAX_SEQ_LENGTH = 256
-EPOCH_VALUES = [1, 2]
+EPOCH_VALUES = [1]
 FINE_TUNE_COMMAND_DICT = {
     "data_path": DEFAULT_HF_DATASET_PATH,
     "project_name": str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
