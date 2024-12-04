@@ -119,7 +119,7 @@ def load_developer_contributors_dataset() -> pd.DataFrame:
 
 def load_experimental_training_results() -> pd.DataFrame:
     """Load the experimental training results."""
-    return pd.read_parquet(EXP_FILES_DIR / "exp-training-results.parquet")
+    return pd.read_csv(EXP_FILES_DIR / "exp-training-results.csv")
 
 
 def load_final_model_training_results() -> dict:
