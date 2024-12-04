@@ -20,7 +20,7 @@ ANNOTATED_DEV_AUTHOR_EM_PATH = DATA_FILES_DIR / "annotated-dev-author-em-resolve
 
 # Data fetching URLs
 SCI_SOFT_MODELS_DATA_URL_TEMPLATE = "https://raw.githubusercontent.com/evamaxfield/sci-soft-models/refs/tags/{version}/sci_soft_models/dev_author_em/data/files/{filename}"
-SCI_SOFT_MODELS_DATA_FETCH_DEFAULT_VERSION = "v0.2.3"
+SCI_SOFT_MODELS_DATA_FETCH_DEFAULT_VERSION = "v0.3.0"
 SCI_SOFT_MODELS_DATA_FILES = [
     "annotated-dev-author-em-resolved.csv",
     "extended-paper-details.parquet",
