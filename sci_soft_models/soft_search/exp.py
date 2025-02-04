@@ -3,9 +3,7 @@
 import os
 import random
 import shutil
-import time
 from dataclasses import dataclass
-from itertools import combinations
 from pathlib import Path
 
 import datasets
@@ -25,44 +23,24 @@ from transformers import Pipeline, pipeline
 
 from .data import (
     EXP_FILES_DIR,
-    load_annotated_dev_author_em_dataset,
-    load_author_contributors_dataset,
-    load_developer_contributors_dataset,
+    load_soft_search_2025_dataset
 )
+from .constants import MODEL_STR_INPUT_TEMPLATE
 
 ###############################################################################
 
 # Models used for testing, both fine-tune and semantic logit
 BASE_MODELS = {
     "deberta": "microsoft/deberta-v3-base",
-    "bert-multilingual": "google-bert/bert-base-multilingual-cased",
-    "distilbert": "distilbert/distilbert-base-uncased",
-    # "modern-bert": "answerdotai/ModernBERT-base",
-    # "mdeberta": "microsoft/mdeberta-v3-base",
+    "modern-bert": "answerdotai/ModernBERT-base",
 }
 
-# Optional fields to create combinations
-OPTIONAL_DATA_FIELDS = [
-    "dev_name",
-    "dev_email",
-]
-
-# Holdout authors and devs sample size
-HOLDOUT_SAMPLE_SIZE = 0.1
-
-# Create all combinations
-OPTIONAL_DATA_FIELDSETS: list[tuple[str, ...]] = [
-    (),  # include no optional data
-]
-for i in range(1, len(OPTIONAL_DATA_FIELDS) + 1):
-    OPTIONAL_DATA_FIELDSETS.extend(list(combinations(OPTIONAL_DATA_FIELDS, i)))
-
 # Fine-tune default settings
-DEFAULT_HF_DATASET_PATH = "evamxb/dev-author-em-dataset"
+DEFAULT_HF_DATASET_PATH = "evamxb/soft-search-2025-dataset"
 _CURRENT_DIR = Path(__file__).parent
 DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH = Path("autotrain-text-classification-temp/")
-DEFAULT_MODEL_MAX_SEQ_LENGTH = 256
-EPOCH_VALUES = [1]
+DEFAULT_MODEL_MAX_SEQ_LENGTH = 512  # TODO: Check this
+EPOCH_VALUES = [1, 2, 3]
 FINE_TUNE_COMMAND_DICT = {
     "data_path": DEFAULT_HF_DATASET_PATH,
     "project_name": str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
@@ -79,15 +57,6 @@ FINE_TUNE_COMMAND_DICT = {
 
 # Evaluation storage path
 EVAL_STORAGE_PATH = _CURRENT_DIR / "exp-model-eval-results"
-
-MODEL_STR_INPUT_TEMPLATE = """
-<developer-details>\n\t<username>{dev_username}</username>{dev_extras}\n</developer-details>
-
----
-
-<author-details>\n\t<name>{author_name}</name>{author_extras}\n</author-details>
-""".strip()
-
 TRAINING_RESULTS_STORAGE_PATH = EXP_FILES_DIR / "exp-training-results.csv"
 
 ###############################################################################
@@ -95,20 +64,17 @@ TRAINING_RESULTS_STORAGE_PATH = EXP_FILES_DIR / "exp-training-results.csv"
 
 @dataclass
 class EvaluationResults(DataClassJsonMixin):
-    fieldset: str
     model: str
     epoch_val: int
     accuracy: float
     precision: float
     recall: float
     f1: float
-    time_pred: float
 
 
 def evaluate(
     model: Pipeline,
     test_df: pd.DataFrame,
-    fieldset: str,
     model_name: str,
     epoch_val: int,
     eval_storage_path: Path,
@@ -120,10 +86,8 @@ def evaluate(
     x_test = test_df["text"].tolist()
     y_test = test_df["label"].tolist()
 
-    # Recore perf time
-    start_time = time.time()
+    # Make prediction
     y_pred = model.predict(x_test)
-    perf_time = (time.time() - start_time) / len(y_test)
 
     # Get the actual predictions from Pipeline
     if isinstance(model, Pipeline):
