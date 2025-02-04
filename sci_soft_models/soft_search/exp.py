@@ -17,29 +17,30 @@ from sklearn.metrics import (
     accuracy_score,
     precision_recall_fscore_support,
 )
+from sklearn.model_selection import train_test_split
 from tabulate import tabulate
 from tqdm import tqdm
 from transformers import Pipeline, pipeline
 
-from .data import (
-    EXP_FILES_DIR,
-    load_soft_search_2025_dataset
-)
 from .constants import MODEL_STR_INPUT_TEMPLATE
+from .data import EXP_FILES_DIR, load_soft_search_2025_training_dataset
 
 ###############################################################################
 
 # Models used for testing, both fine-tune and semantic logit
 BASE_MODELS = {
-    "deberta": "microsoft/deberta-v3-base",
-    "modern-bert": "answerdotai/ModernBERT-base",
+    "bert": "google-bert/bert-base-uncased",
+    # "deberta": "microsoft/deberta-v3-base",
+    # "modern-bert": "answerdotai/ModernBERT-base",
+    # "nomic-bert": "nomic-ai/nomic-bert-2048",
+    # "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
 }
 
 # Fine-tune default settings
-DEFAULT_HF_DATASET_PATH = "evamxb/soft-search-2025-dataset"
+DEFAULT_HF_DATASET_PATH = "evamxb/soft-search-2025-training-dataset"
 _CURRENT_DIR = Path(__file__).parent
 DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH = Path("autotrain-text-classification-temp/")
-DEFAULT_MODEL_MAX_SEQ_LENGTH = 512  # TODO: Check this
+DEFAULT_MODEL_MAX_SEQ_LENGTH = 512
 EPOCH_VALUES = [1, 2, 3]
 FINE_TUNE_COMMAND_DICT = {
     "data_path": DEFAULT_HF_DATASET_PATH,
@@ -47,12 +48,13 @@ FINE_TUNE_COMMAND_DICT = {
     "text_column": "text",
     "target_column": "label",
     "train_split": "train",
-    # "epochs": 1,
     "lr": 1e-5,
     "auto_find_batch_size": True,
     "seed": 12,
     "max_seq_length": DEFAULT_MODEL_MAX_SEQ_LENGTH,
     "logging_steps": 10,
+    # "peft": True,
+    # "quantization": "int4",
 }
 
 # Evaluation storage path
@@ -102,7 +104,7 @@ def evaluate(
         y_test,
         y_pred,
         average="binary",
-        pos_label="match",
+        pos_label="software-produced",
     )
 
     # Print results
@@ -111,21 +113,10 @@ def evaluate(
         f"Precision: {precision}, "
         f"Recall: {recall}, "
         f"F1: {f1}, "
-        f"Time/Pred: {perf_time}"
     )
 
-    # Create sub-dir for fieldset
-    if len(fieldset) == 0:
-        fieldset_dir_name = "no-optional-data"
-    else:
-        fieldset_dir_name = fieldset
-
-    # Create storage dir for model evals
-    this_model_eval_storage = eval_storage_path / fieldset_dir_name
-    this_model_eval_storage.mkdir(exist_ok=True)
-
     # Model short name
-    this_model_eval_storage = this_model_eval_storage / model_name
+    this_model_eval_storage = eval_storage_path / model_name
     this_model_eval_storage.mkdir(exist_ok=True)
 
     # Epoch value
@@ -154,18 +145,16 @@ def evaluate(
     )
 
     return EvaluationResults(
-        fieldset=fieldset,
         model=model_name,
         epoch_val=epoch_val,
         accuracy=accuracy,
         precision=precision,
         recall=recall,
         f1=f1,
-        time_pred=perf_time,
     )
 
 
-def run(  # noqa: C901
+def run(
     results_output_path: Path = TRAINING_RESULTS_STORAGE_PATH,
 ) -> None:
     # Load environment variables
@@ -187,316 +176,219 @@ def run(  # noqa: C901
     ###############################################################################
 
     # Load data
-    dev_author_full_details = load_annotated_dev_author_em_dataset()
+    full_set = load_soft_search_2025_training_dataset()
 
-    # Drop any rows with na
-    dev_author_full_details = dev_author_full_details.dropna()
+    # Rename column from "software_produced" to "label"
+    full_set = full_set.rename(columns={"software_produced": "label"})
 
-    # Cast semantic_scholar_id to string
-    dev_author_full_details["semantic_scholar_id"] = dev_author_full_details[
-        "semantic_scholar_id"
-    ].astype(str)
-
-    # Load the authors dataset
-    authors = load_author_contributors_dataset()
-
-    # Drop everything but the author_id and the name
-    authors = authors[["author_id", "name"]].dropna()
-
-    # Load the repos dataset to get to devs
-    devs = load_developer_contributors_dataset()
-
-    # Get unique devs by grouping by username
-    # and then taking the first email and first "name"
-    devs = devs.groupby("username").first().reset_index()
-
-    # For each row in terra, get the matching author and dev
-    full_dataset = []
-    for _, row in dev_author_full_details.iterrows():
-        try:
-            # Get the author details
-            author_details = authors[
-                authors["author_id"] == row["semantic_scholar_id"]
-            ].iloc[0]
-
-            # Get the dev details
-            dev_details = devs[devs["username"] == row["github_id"]].iloc[0]
-
-            # Add to the dataset
-            full_dataset.append(
-                {
-                    "dev_username": row["github_id"],
-                    "dev_name": dev_details["name"],
-                    "dev_email": dev_details["email"],
-                    "dev_bio": dev_details["bio"],
-                    "author_id": row["semantic_scholar_id"],
-                    "author_name": author_details["name"],
-                    "match": "match" if row["match"] else "no-match",
-                }
-            )
-        except Exception:
-            pass
-
-    # Convert to dataframe
-    dev_author_full_details = pd.DataFrame(full_dataset)
-
-    # Create test set holdout by selecting 10% random unique devs and authors
-    # and then adding all of their comparisons to the test set
-    unique_devs = pd.Series(dev_author_full_details["dev_username"].unique())
-    unique_authors = pd.Series(dev_author_full_details["author_id"].unique())
-    test_devs = unique_devs.sample(
-        frac=HOLDOUT_SAMPLE_SIZE,
-        random_state=12,
-        replace=False,
+    # Map values in label column from True/False
+    # to "software-produced"/"software-not-produced"
+    full_set["label"] = full_set["label"].apply(
+        lambda x: "software-produced" if x else "software-not-produced"
     )
-    test_authors = unique_authors.sample(
-        frac=HOLDOUT_SAMPLE_SIZE,
-        random_state=12,
-        replace=False,
-    )
-    train_rows = []
-    test_rows = []
-    for _, row in dev_author_full_details.iterrows():
-        if (
-            row["dev_username"] in test_devs.values
-            or row["author_id"] in test_authors.values
-        ):
-            test_rows.append(row)
-        else:
-            train_rows.append(row)
 
-    # Create train and test sets
-    train_set = pd.DataFrame(train_rows)
-    test_set = pd.DataFrame(test_rows)
+    # Create the "text" columns
+    full_set["text"] = full_set.apply(
+        lambda x: MODEL_STR_INPUT_TEMPLATE.format(
+            award_title=x["title"],
+            award_abstract=x["abstractText"],
+        ),
+        axis=1,
+    )
+
+    # Subset to only include the "grant_id", "text", and "label" columns
+    full_set = full_set[["grant_id", "text", "label"]]
 
     # Store class details required for feature construction
-    num_classes = dev_author_full_details["match"].nunique()
-    class_labels = list(dev_author_full_details["match"].unique())
+    num_classes = full_set["label"].nunique()
+    class_labels = list(full_set["label"].unique())
 
-    def convert_split_details_to_text_input_dataset(
-        df: pd.DataFrame,
-        fieldset: tuple[str, ...],
-    ) -> tuple[pd.DataFrame, datasets.Dataset]:
-        # Construct the model input strings
-        rows = []
-        for _, row in df.iterrows():
-            # Construct dev extras
-            dev_extras = []
-            for field in fieldset:
-                if field.startswith("dev_"):
-                    cleaned_field_name = field.replace("dev_", "")
-                    dev_extras.append(
-                        f"<{cleaned_field_name}>{row[field]}</{cleaned_field_name}>"
-                    )
-            dev_extras_str = "\n\t".join(dev_extras)
+    # Construct features for the dataset
+    features = datasets.Features(
+        grant_id=datasets.Value("string"),
+        text=datasets.Value("string"),
+        label=datasets.ClassLabel(
+            num_classes=num_classes,
+            names=class_labels,
+        ),
+    )
 
-            # Always prepend with new line and tab
-            if len(dev_extras_str) > 0:
-                dev_extras_str = "\n\t" + dev_extras_str
+    results = []
+    # Iter through epochs
+    for epoch_val in tqdm(
+        EPOCH_VALUES,
+        desc="Multiple Epochs Testing",
+        leave=False,
+    ):
+        # Set seed
+        np.random.seed(12)
+        random.seed(12)
 
-            # Construct author extras
-            author_extras = []
-            for field in fieldset:
-                if field.startswith("author_"):
-                    cleaned_field_name = field.replace("author_", "")
-                    author_extras.append(
-                        f"<{cleaned_field_name}>{row[field]}</{cleaned_field_name}>"
-                    )
-            author_extras_str = "\n\t".join(author_extras)
-
-            # Always prepend with new line and tab
-            if len(author_extras_str) > 0:
-                author_extras_str = "\n\t" + author_extras_str
-
-            # Construct the model input string
-            model_str_input = MODEL_STR_INPUT_TEMPLATE.format(
-                dev_username=row["dev_username"],
-                dev_extras=dev_extras_str,
-                author_name=row["author_name"],
-                author_extras=author_extras_str,
-            )
-            rows.append(
-                {
-                    "text": model_str_input.strip(),
-                    "label": row["match"],
-                }
+        # Handle single epoch
+        if epoch_val == 1:
+            # Split once
+            train_df, test_df = train_test_split(
+                full_set,
+                test_size=0.2,
+                random_state=12,
+                stratify=full_set["label"],
             )
 
-        # Construct features for the dataset
-        features = datasets.Features(
-            text=datasets.Value("string"),
-            label=datasets.ClassLabel(
-                num_classes=num_classes,
-                names=class_labels,
-            ),
-        )
-
-        # Construct the dataset
-        return (
-            pd.DataFrame(rows),
-            datasets.Dataset.from_pandas(
-                pd.DataFrame(rows),
+            # Convert to datasets
+            train_dataset = datasets.Dataset.from_pandas(
+                train_df,
                 features=features,
                 preserve_index=False,
-            ),
-        )
+            )
+            test_dataset = datasets.Dataset.from_pandas(
+                test_df,
+                features=features,
+                preserve_index=False,
+            )
 
-    # Create a dataframe where the rows are the different splits
-    # and there are three columns one column is the split name,
-    # the other columns are the counts of match
-    split_counts = []
-    for split_name, split_df in [
-        ("train", train_set),
-        ("test", test_set),
-    ]:
-        split_counts.append(
-            {
-                "split": split_name,
-                **split_df["match"].value_counts().to_dict(),
-                **{
-                    f"{k}%": v
-                    for k, v in split_df["match"]
-                    .value_counts(normalize=True)
-                    .to_dict()
-                    .items()
-                },
-            }
-        )
-    split_counts_df = pd.DataFrame(split_counts)
-    print("Split counts:")
-    print(split_counts_df)
-    print()
+            # Store to dataset dict
+            ds_dict = datasets.DatasetDict(
+                {
+                    "train": train_dataset,
+                    "test": test_dataset,
+                }
+            )
 
-    # Iter through fieldsets
-    results = []
-    for fieldset in tqdm(
-        OPTIONAL_DATA_FIELDSETS,
-        desc="Fieldsets",
-    ):
+        else:
+            # Create splits
+            train_df, test_and_valid_sets = train_test_split(
+                full_set,
+                test_size=0.4,
+                random_state=12,
+                stratify=full_set["label"],
+            )
+            test_df, valid_df = train_test_split(
+                test_and_valid_sets,
+                test_size=0.5,
+                random_state=12,
+                stratify=test_and_valid_sets["label"],
+            )
+
+            # Convert to datasets
+            train_dataset = datasets.Dataset.from_pandas(
+                train_df,
+                features=features,
+                preserve_index=False,
+            )
+            test_dataset = datasets.Dataset.from_pandas(
+                test_df,
+                features=features,
+                preserve_index=False,
+            )
+            valid_dataset = datasets.Dataset.from_pandas(
+                valid_df,
+                features=features,
+                preserve_index=False,
+            )
+
+            # Store to dataset dict
+            ds_dict = datasets.DatasetDict(
+                {
+                    "train": train_dataset,
+                    "test": test_dataset,
+                    "valid": valid_dataset,
+                }
+            )
+
+        # Create split tuples
+        splits = [
+            ("train", train_df),
+            ("test", test_df),
+        ]
+        if epoch_val > 1:
+            splits.append(("valid", valid_df))
+
+        # Create a dataframe where the rows are the different splits
+        # and there are three columns one column is the split name,
+        # the other columns are the counts of match
+        split_counts = []
+        for split_name, split_df in splits:
+            split_counts.append(
+                {
+                    "split": split_name,
+                    **split_df["label"].value_counts().to_dict(),
+                    **{
+                        f"{k}%": v
+                        for k, v in split_df["label"]
+                        .value_counts(normalize=True)
+                        .to_dict()
+                        .items()
+                    },
+                }
+            )
+        split_counts_df = pd.DataFrame(split_counts)
+        print("Split counts:")
+        print(split_counts_df)
         print()
-        print(f"Working on fieldset: '{fieldset}'")
-        try:
-            # Create the datasets
-            (
-                fieldset_train_df,
-                fieldset_train_ds,
-            ) = convert_split_details_to_text_input_dataset(
-                train_set,
-                fieldset,
+
+        # Print example input
+        print("Example input:")
+        print("-" * 20)
+        print()
+        print(train_df.sample(1).iloc[0].text)
+        print()
+        print("-" * 20)
+        print()
+
+        # Push to hub
+        print("Pushing dataset to hub")
+        ds_dict.push_to_hub(
+            DEFAULT_HF_DATASET_PATH,
+            private=True,
+            token=os.environ["HF_AUTH_TOKEN"],
+        )
+        print()
+        print()
+
+        # Fine-tune from each base
+        for model_short_name, hf_model_path in tqdm(
+            BASE_MODELS.items(),
+            desc="Fine-tune models",
+            leave=False,
+        ):
+            # Delete existing temp storage if exists
+            if DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH.exists():
+                shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
+
+            # Update the fine-tune command dict
+            this_iter_command_dict = FINE_TUNE_COMMAND_DICT.copy()
+            this_iter_command_dict["model"] = hf_model_path
+            this_iter_command_dict["epochs"] = epoch_val
+
+            # Add "valid_split" to command dict
+            if epoch_val > 1:
+                this_iter_command_dict["valid_split"] = "valid"
+            else:
+                this_iter_command_dict["valid_split"] = None
+
+            # Train the model
+            ft_train(
+                this_iter_command_dict,
             )
-            (
-                fieldset_test_df,
-                fieldset_test_ds,
-            ) = convert_split_details_to_text_input_dataset(
-                test_set,
-                fieldset,
+
+            # Evaluate the model
+            ft_transformer_pipe = pipeline(
+                task="text-classification",
+                model=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
+                tokenizer=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
+                padding=True,
+                truncation=True,
+                max_length=DEFAULT_MODEL_MAX_SEQ_LENGTH,
             )
 
-            # Store as dataset dict
-            fieldset_ds_dict = datasets.DatasetDict(
-                {
-                    "train": fieldset_train_ds,
-                    # "valid": fieldset_valid_ds,
-                    "test": fieldset_test_ds,
-                }
-            )
-
-            # Print example input
-            print("Example input:")
-            print("-" * 20)
-            print()
-            print(fieldset_train_df.sample(1).iloc[0].text)
-            print()
-            print("-" * 20)
-            print()
-
-            # Push to hub
-            print("Pushing this fieldset to hub")
-            fieldset_ds_dict.push_to_hub(
-                DEFAULT_HF_DATASET_PATH,
-                private=True,
-                token=os.environ["HF_AUTH_TOKEN"],
-            )
-            print()
-            print()
-
-            # Train each fine-tuned model
-            for model_short_name, hf_model_path in tqdm(
-                BASE_MODELS.items(),
-                desc="Fine-tune models",
-                leave=False,
-            ):
-                # Iter through epochs
-                for epoch_val in tqdm(
-                    EPOCH_VALUES,
-                    desc="Multiple Epochs Testing",
-                    leave=False,
-                ):
-                    # Set seed
-                    np.random.seed(12)
-                    random.seed(12)
-
-                    print()
-                    print(f"Working on: {model_short_name}")
-                    try:
-                        # Delete existing temp storage if exists
-                        if DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH.exists():
-                            shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
-
-                        # Update the fine-tune command dict
-                        this_iter_command_dict = FINE_TUNE_COMMAND_DICT.copy()
-                        this_iter_command_dict["model"] = hf_model_path
-                        this_iter_command_dict["epochs"] = epoch_val
-
-                        # Train the model
-                        ft_train(
-                            this_iter_command_dict,
-                        )
-
-                        # Evaluate the model
-                        ft_transformer_pipe = pipeline(
-                            task="text-classification",
-                            model=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
-                            tokenizer=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
-                            padding=True,
-                            truncation=True,
-                            max_length=DEFAULT_MODEL_MAX_SEQ_LENGTH,
-                        )
-
-                        # Handle empty fieldset
-                        if len(fieldset) == 0:
-                            fieldset = ["no-optional-data"]
-
-                        results.append(
-                            evaluate(
-                                model=ft_transformer_pipe,
-                                test_df=fieldset_test_df.copy(),
-                                fieldset="-".join(fieldset),
-                                model_name=model_short_name,
-                                epoch_val=epoch_val,
-                                eval_storage_path=EVAL_STORAGE_PATH,
-                            ).to_dict(),
-                        )
-
-                    except Exception as e:
-                        print(f"Error during: {model_short_name}, Error: {e}")
-                        results.append(
-                            {
-                                "fieldset": fieldset,
-                                "model": model_short_name,
-                                "error_level": "fine-tune model training",
-                                "error": str(e),
-                            }
-                        )
-
-        except Exception as e:
-            print(f"Error during: {fieldset}, Error: {e}")
             results.append(
-                {
-                    "fieldset": fieldset,
-                    "error_level": "dataset creation",
-                    "error": str(e),
-                }
+                evaluate(
+                    model=ft_transformer_pipe,
+                    test_df=test_df.copy(),
+                    model_name=model_short_name,
+                    epoch_val=epoch_val,
+                    eval_storage_path=EVAL_STORAGE_PATH,
+                ).to_dict(),
             )
 
         print()
