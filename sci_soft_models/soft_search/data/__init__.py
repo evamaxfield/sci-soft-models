@@ -203,3 +203,14 @@ def _create_soft_search_2025_training_dataset(
     annotated_awards.to_parquet(output_path)
 
     return annotated_awards
+
+
+def load_soft_search_2025_training_dataset() -> pd.DataFrame:
+    """Load the soft search 2025 training dataset."""
+    # Load
+    df = pd.read_parquet(SOFT_SEARCH_TRAINING_2025_PATH)
+
+    # Drop NaNs on subset "title" and "abstractText"
+    df = df.dropna(subset=["title", "abstractText"])
+
+    return df
