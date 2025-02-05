@@ -1,1 +1,1 @@
-"""Training and application of the SoftSearch (software production from grant information) model"""
+"""Training and application of the software production from grant details model."""

@@ -4,6 +4,7 @@ import torch
 
 ###############################################################################
 
+
 def find_device(use_available_device: bool | str = True) -> str:
     if isinstance(use_available_device, str):
         return use_available_device
