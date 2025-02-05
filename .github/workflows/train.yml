@@ -34,8 +34,8 @@ jobs:
               --single \
               --cloud=aws \
               --cloud-region=us-west-2 \
-              --cloud-type=g5.2xlarge \
-              --cloud-gpu=a10g \
+              --cloud-type=g4ad.xlarge \
+              --cloud-gpu=tesla \
               --labels=cml-runner
 
   run-command:
