@@ -64,8 +64,8 @@ training = [
 
 # entry points
 # https://peps.python.org/pep-0621/#entry-points
-# [project.entry-points."console_scripts"]
-# rs-graph-modeling = "rs_graph.bin.modeling:main"
+[project.entry-points."console_scripts"]
+sci-soft-models-cli = "sci_soft_models.bin.cli:main"
 
 # build settings
 # https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html

@@ -37,6 +37,8 @@ BASE_MODELS = {
     "deberta": "microsoft/deberta-v3-base",
     "bert-multilingual": "google-bert/bert-base-multilingual-cased",
     "distilbert": "distilbert/distilbert-base-uncased",
+    # "modern-bert": "answerdotai/ModernBERT-base",
+    # "mdeberta": "microsoft/mdeberta-v3-base",
 }
 
 # Optional fields to create combinations
