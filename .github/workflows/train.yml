@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   deploy-runner:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: iterative/setup-cml@v2
@@ -41,7 +41,6 @@ jobs:
   run-command:
     needs: deploy-runner
     runs-on: [self-hosted, cml-runner]
-    container: python:3.12
     timeout-minutes: 14400 # 1 week
     steps:
       - uses: actions/checkout@v4
