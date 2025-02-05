@@ -2,6 +2,8 @@
 default:
   just --list
 
+set dotenv-load
+
 ###############################################################################
 # Basic project and env management
 
@@ -16,11 +18,16 @@ clean:
 	find . -name '*~' -exec rm -f {} +
 	find . -name '__pycache__' -exec rm -fr {} +
 	rm -fr .mypy_cache
+	rm -fr .pytest_cache
+	rm -fr .ruff_cache
+	rm -fr build
+	rm -fr autotrain-text-classification-temp
+	rm -fr dev-author-em-clf
 
 # install with all deps
 install:
 	pip install uv
-	uv pip install -e ".[dev,lint,test,training]"
+	uv pip install -e ".[dev,lint,test,training,coiled]"
 
 # lint, format, and check all files
 lint:
@@ -41,3 +48,17 @@ tag-for-release version:
 # release a new version
 release:
 	git push --follow-tags
+
+###############################################################################
+# Coiled
+
+default_machine := "g4dn.xlarge"
+
+# run command on coiled with environment
+run-on-coiled cmd machine=default_machine:
+	just clean
+	coiled run \
+		--vm-type {{machine}} \
+		--region us-west-2 \
+		--env HF_AUTH_TOKEN=$HF_AUTH_TOKEN \
+		-- {{cmd}}

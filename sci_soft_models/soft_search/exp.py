@@ -30,11 +30,11 @@ from .data import EXP_FILES_DIR, load_soft_search_2025_training_dataset
 
 # Models used for testing, both fine-tune and semantic logit
 BASE_MODELS = {
-    "bert": "google-bert/bert-base-uncased",
-    "deberta": "microsoft/deberta-v3-base",
+    # "bert": "google-bert/bert-base-uncased",
+    # "deberta": "microsoft/deberta-v3-base",
     "modern-bert": "answerdotai/ModernBERT-base",
-    "nomic-bert": "nomic-ai/nomic-bert-2048",
-    "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
+    # "nomic-bert": "nomic-ai/nomic-bert-2048",
+    # "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
 }
 
 # Fine-tune default settings
@@ -156,6 +156,8 @@ def evaluate(
 def run(
     results_output_path: Path = TRAINING_RESULTS_STORAGE_PATH,
 ) -> None:
+    print("Starting experimental run for SoftSearch...")
+
     # Load environment variables
     load_dotenv()
     FINE_TUNE_COMMAND_DICT["token"] = os.environ["HF_AUTH_TOKEN"]
@@ -317,6 +319,7 @@ def run(
             desc="Fine-tune models",
             leave=False,
         ):
+            print(f"Fine-tuning model: {model_short_name}")
             # Delete existing temp storage if exists
             if DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH.exists():
                 shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
