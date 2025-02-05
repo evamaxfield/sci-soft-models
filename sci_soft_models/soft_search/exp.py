@@ -22,6 +22,7 @@ from tabulate import tabulate
 from tqdm import tqdm
 from transformers import Pipeline, pipeline
 
+from ..utils import find_device
 from .constants import MODEL_STR_INPUT_TEMPLATE
 from .data import EXP_FILES_DIR, load_soft_search_2025_training_dataset
 
@@ -41,7 +42,7 @@ DEFAULT_HF_DATASET_PATH = "evamxb/soft-search-2025-training-dataset"
 _CURRENT_DIR = Path(__file__).parent
 DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH = Path("autotrain-text-classification-temp/")
 DEFAULT_MODEL_MAX_SEQ_LENGTH = 512
-EPOCH_VALUES = [1, 2, 3]
+EPOCH_VALUES = [1, 2, 3, 4, 5]
 FINE_TUNE_COMMAND_DICT = {
     "data_path": DEFAULT_HF_DATASET_PATH,
     "project_name": str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
@@ -103,8 +104,7 @@ def evaluate(
     precision, recall, f1, _ = precision_recall_fscore_support(
         y_test,
         y_pred,
-        average="binary",
-        pos_label="software-produced",
+        average="macro",
     )
 
     # Print results
@@ -178,6 +178,8 @@ def run(
     # Load data
     full_set = load_soft_search_2025_training_dataset()
 
+    full_set = full_set.sample(500)
+
     # Rename column from "software_produced" to "label"
     full_set = full_set.rename(columns={"software_produced": "label"})
 
@@ -197,7 +199,16 @@ def run(
     )
 
     # Subset to only include the "grant_id", "text", and "label" columns
-    full_set = full_set[["grant_id", "text", "label"]]
+    full_set = full_set[
+        [
+            "grant_id",
+            "directorate",
+            "reduced_directorate",
+            "text",
+            "label",
+            "stratify_group",
+        ]
+    ]
 
     # Store class details required for feature construction
     num_classes = full_set["label"].nunique()
@@ -206,12 +217,88 @@ def run(
     # Construct features for the dataset
     features = datasets.Features(
         grant_id=datasets.Value("string"),
+        directorate=datasets.Value("string"),
+        reduced_directorate=datasets.Value("string"),
         text=datasets.Value("string"),
         label=datasets.ClassLabel(
             num_classes=num_classes,
             names=class_labels,
         ),
+        stratify_group=datasets.Value("string"),
     )
+
+    # Split once
+    train_df, test_df = train_test_split(
+        full_set,
+        test_size=0.2,
+        random_state=12,
+        stratify=full_set["stratify_group"],
+    )
+
+    # Convert to datasets
+    train_dataset = datasets.Dataset.from_pandas(
+        train_df,
+        features=features,
+        preserve_index=False,
+    )
+    test_dataset = datasets.Dataset.from_pandas(
+        test_df,
+        features=features,
+        preserve_index=False,
+    )
+
+    # Store to dataset dict
+    ds_dict = datasets.DatasetDict(
+        {
+            "train": train_dataset,
+            "test": test_dataset,
+        }
+    )
+
+    # Create a dataframe where the rows are the different splits
+    # and there are three columns one column is the split name,
+    # the other columns are the counts of match
+    split_counts = []
+    for split_name, split_df in [
+        ("train", train_df),
+        ("test", test_df),
+    ]:
+        split_counts.append(
+            {
+                "split": split_name,
+                **split_df["label"].value_counts().to_dict(),
+                **{
+                    f"{k}%": v
+                    for k, v in split_df["label"]
+                    .value_counts(normalize=True)
+                    .to_dict()
+                    .items()
+                },
+            }
+        )
+    split_counts_df = pd.DataFrame(split_counts)
+    print("Split counts:")
+    print(split_counts_df)
+    print()
+
+    # Print example input
+    print("Example input:")
+    print("-" * 20)
+    print()
+    print(train_df.sample(1).iloc[0].text)
+    print()
+    print("-" * 20)
+    print()
+
+    # Push to hub
+    print("Pushing dataset to hub")
+    ds_dict.push_to_hub(
+        DEFAULT_HF_DATASET_PATH,
+        private=True,
+        token=os.environ["HF_AUTH_TOKEN"],
+    )
+    print()
+    print()
 
     results = []
     # Iter through epochs
@@ -223,127 +310,6 @@ def run(
         # Set seed
         np.random.seed(12)
         random.seed(12)
-
-        # Handle single epoch
-        if epoch_val == 1:
-            # Split once
-            train_df, test_df = train_test_split(
-                full_set,
-                test_size=0.2,
-                random_state=12,
-                stratify=full_set["label"],
-            )
-
-            # Convert to datasets
-            train_dataset = datasets.Dataset.from_pandas(
-                train_df,
-                features=features,
-                preserve_index=False,
-            )
-            test_dataset = datasets.Dataset.from_pandas(
-                test_df,
-                features=features,
-                preserve_index=False,
-            )
-
-            # Store to dataset dict
-            ds_dict = datasets.DatasetDict(
-                {
-                    "train": train_dataset,
-                    "test": test_dataset,
-                }
-            )
-
-        else:
-            # Create splits
-            train_df, test_and_valid_sets = train_test_split(
-                full_set,
-                test_size=0.4,
-                random_state=12,
-                stratify=full_set["label"],
-            )
-            test_df, valid_df = train_test_split(
-                test_and_valid_sets,
-                test_size=0.5,
-                random_state=12,
-                stratify=test_and_valid_sets["label"],
-            )
-
-            # Convert to datasets
-            train_dataset = datasets.Dataset.from_pandas(
-                train_df,
-                features=features,
-                preserve_index=False,
-            )
-            test_dataset = datasets.Dataset.from_pandas(
-                test_df,
-                features=features,
-                preserve_index=False,
-            )
-            valid_dataset = datasets.Dataset.from_pandas(
-                valid_df,
-                features=features,
-                preserve_index=False,
-            )
-
-            # Store to dataset dict
-            ds_dict = datasets.DatasetDict(
-                {
-                    "train": train_dataset,
-                    "test": test_dataset,
-                    "valid": valid_dataset,
-                }
-            )
-
-        # Create split tuples
-        splits = [
-            ("train", train_df),
-            ("test", test_df),
-        ]
-        if epoch_val > 1:
-            splits.append(("valid", valid_df))
-
-        # Create a dataframe where the rows are the different splits
-        # and there are three columns one column is the split name,
-        # the other columns are the counts of match
-        split_counts = []
-        for split_name, split_df in splits:
-            split_counts.append(
-                {
-                    "split": split_name,
-                    **split_df["label"].value_counts().to_dict(),
-                    **{
-                        f"{k}%": v
-                        for k, v in split_df["label"]
-                        .value_counts(normalize=True)
-                        .to_dict()
-                        .items()
-                    },
-                }
-            )
-        split_counts_df = pd.DataFrame(split_counts)
-        print("Split counts:")
-        print(split_counts_df)
-        print()
-
-        # Print example input
-        print("Example input:")
-        print("-" * 20)
-        print()
-        print(train_df.sample(1).iloc[0].text)
-        print()
-        print("-" * 20)
-        print()
-
-        # Push to hub
-        print("Pushing dataset to hub")
-        ds_dict.push_to_hub(
-            DEFAULT_HF_DATASET_PATH,
-            private=True,
-            token=os.environ["HF_AUTH_TOKEN"],
-        )
-        print()
-        print()
 
         # Fine-tune from each base
         for model_short_name, hf_model_path in tqdm(
@@ -360,16 +326,13 @@ def run(
             this_iter_command_dict["model"] = hf_model_path
             this_iter_command_dict["epochs"] = epoch_val
 
-            # Add "valid_split" to command dict
-            if epoch_val > 1:
-                this_iter_command_dict["valid_split"] = "valid"
-            else:
-                this_iter_command_dict["valid_split"] = None
-
             # Train the model
             ft_train(
                 this_iter_command_dict,
             )
+
+            # Find device
+            device = find_device()
 
             # Evaluate the model
             ft_transformer_pipe = pipeline(
@@ -379,6 +342,7 @@ def run(
                 padding=True,
                 truncation=True,
                 max_length=DEFAULT_MODEL_MAX_SEQ_LENGTH,
+                device=device,
             )
 
             results.append(
