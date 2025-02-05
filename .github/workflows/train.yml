@@ -1,0 +1,55 @@
+name: Model Training and Evaluation
+
+on: 
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Command to run"
+        required: true
+        type: string
+
+# adding permissions to tackle error: 'Resource not accessible by integration'
+permissions:
+  actions: write
+  contents: write
+  id-token: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  deploy-runner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: iterative/setup-cml@v2
+        with:
+          vega: false
+      - name: Deploy Runner
+        env:
+            REPO_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+            AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          cml runner \
+              --single \
+              --cloud=aws \
+              --cloud-region=us-west-2 \
+              --cloud-type=g5.2xlarge \
+              --cloud-gpu=a10g \
+              --labels=cml-runner
+
+  run-command:
+    needs: deploy-runner
+    runs-on: [self-hosted, cml-runner]
+    container: python:3.12
+    timeout-minutes: 14400 # 1 week
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          pip install uv && uv pip install --system --no-cache-dir -e .
+      
+      - name: Run Command
+        run: |
+          ${{ github.event.inputs.command }}

@@ -31,18 +31,19 @@ from .data import EXP_FILES_DIR, load_soft_search_2025_training_dataset
 # Models used for testing, both fine-tune and semantic logit
 BASE_MODELS = {
     "bert": "google-bert/bert-base-uncased",
-    # "deberta": "microsoft/deberta-v3-base",
-    # "modern-bert": "answerdotai/ModernBERT-base",
-    # "nomic-bert": "nomic-ai/nomic-bert-2048",
-    # "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
+    "deberta": "microsoft/deberta-v3-base",
+    "modern-bert": "answerdotai/ModernBERT-base",
+    "nomic-bert": "nomic-ai/nomic-bert-2048",
+    "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
 }
 
 # Fine-tune default settings
 DEFAULT_HF_DATASET_PATH = "evamxb/soft-search-2025-training-dataset"
 _CURRENT_DIR = Path(__file__).parent
 DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH = Path("autotrain-text-classification-temp/")
-DEFAULT_MODEL_MAX_SEQ_LENGTH = 512
-EPOCH_VALUES = [1, 2, 3, 4, 5]
+DEFAULT_MODEL_MAX_SEQ_LENGTH = 2048
+# EPOCH_VALUES = [1, 2, 3, 4, 5]
+EPOCH_VALUES = [1]
 FINE_TUNE_COMMAND_DICT = {
     "data_path": DEFAULT_HF_DATASET_PATH,
     "project_name": str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
@@ -54,8 +55,6 @@ FINE_TUNE_COMMAND_DICT = {
     "seed": 12,
     "max_seq_length": DEFAULT_MODEL_MAX_SEQ_LENGTH,
     "logging_steps": 10,
-    # "peft": True,
-    # "quantization": "int4",
 }
 
 # Evaluation storage path
@@ -194,6 +193,7 @@ def run(
         lambda x: MODEL_STR_INPUT_TEMPLATE.format(
             award_title=x["title"],
             award_abstract=x["abstractText"],
+            award_outcomes=x["projectOutComesReport"],
         ),
         axis=1,
     )
