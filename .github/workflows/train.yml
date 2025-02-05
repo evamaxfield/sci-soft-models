@@ -51,5 +51,7 @@ jobs:
           pip install uv && uv pip install --system --no-cache-dir -e .
       
       - name: Run Command
+        env:
+          HF_AUTH_TOKEN: ${{ secrets.HF_AUTH_TOKEN }}
         run: |
           ${{ github.event.inputs.command }}
