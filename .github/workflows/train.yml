@@ -41,9 +41,16 @@ jobs:
     needs: deploy-runner
     runs-on: [self-hosted, cml-runner]
     container:
-      image: ghcr.io/iterative/cml:0-dvc2-base1-gpu
+      image: docker://pytorch/pytorch:2.6.0-cuda11.8-cudnn9-devel
+      options: --gpus all
     timeout-minutes: 14400 # 1 week
     steps:
+      - name: Install Git and Build Essentials
+        run: |
+          apt-get update
+          apt-get install -y git
+          apt-get install -y build-essential
+
       - uses: actions/checkout@v4
 
       - name: Check GPUs
