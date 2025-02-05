@@ -42,7 +42,6 @@ jobs:
     runs-on: [self-hosted, cml-runner]
     container:
       image: ghcr.io/iterative/cml:0-dvc2-base1-gpu
-      options: --gpus all
     timeout-minutes: 14400 # 1 week
     steps:
       - uses: actions/checkout@v4
