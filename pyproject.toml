@@ -30,7 +30,7 @@ dependencies = [
   "dataclasses-json>=0.6,<0.7",
   "requests>=2,<3",
   "torch>=2,<3",
-  "transformers>=4,<5",
+  "transformers>=4.48,<5",
 ]
 
 [project.urls]
@@ -53,7 +53,6 @@ test = [
   "pytest>=8,<9",
 ]
 training = [
-  "autotrain-advanced>=0.8,<0.9",
   "datasets>=2,<3",
   "python-dotenv==1.0.1",
   "pandas>=1,<3",

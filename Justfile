@@ -52,13 +52,12 @@ release:
 ###############################################################################
 # Coiled
 
-default_machine := "g4dn.xlarge"
+default_machine := "g5.xlarge"
 
 # run command on coiled with environment
-run-on-coiled cmd machine=default_machine:
+coiled-run cmd machine=default_machine:
 	just clean
 	coiled run \
 		--vm-type {{machine}} \
 		--region us-west-2 \
-		--env HF_AUTH_TOKEN=$HF_AUTH_TOKEN \
 		-- {{cmd}}

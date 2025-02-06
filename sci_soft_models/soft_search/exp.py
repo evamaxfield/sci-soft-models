@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-import os
 import random
 import shutil
 from dataclasses import dataclass
@@ -9,9 +8,7 @@ from pathlib import Path
 import datasets
 import numpy as np
 import pandas as pd
-from autotrain.trainers.text_classification.__main__ import train as ft_train
 from dataclasses_json import DataClassJsonMixin
-from dotenv import load_dotenv
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     accuracy_score,
@@ -20,7 +17,15 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from tabulate import tabulate
 from tqdm import tqdm
-from transformers import Pipeline, pipeline
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    DataCollatorWithPadding,
+    Pipeline,
+    Trainer,
+    TrainingArguments,
+    pipeline,
+)
 
 from ..utils import find_device
 from .constants import MODEL_STR_INPUT_TEMPLATE
@@ -30,9 +35,9 @@ from .data import EXP_FILES_DIR, load_soft_search_2025_training_dataset
 
 # Models used for testing, both fine-tune and semantic logit
 BASE_MODELS = {
-    # "bert": "google-bert/bert-base-uncased",
-    # "deberta": "microsoft/deberta-v3-base",
-    "modern-bert": "answerdotai/ModernBERT-base",
+    "bert": "google-bert/bert-base-uncased",
+    "deberta": "microsoft/deberta-v3-base",
+    # "modern-bert": "answerdotai/ModernBERT-base",
     # "nomic-bert": "nomic-ai/nomic-bert-2048",
     # "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
 }
@@ -41,21 +46,8 @@ BASE_MODELS = {
 DEFAULT_HF_DATASET_PATH = "evamxb/soft-search-2025-training-dataset"
 _CURRENT_DIR = Path(__file__).parent
 DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH = Path("autotrain-text-classification-temp/")
-DEFAULT_MODEL_MAX_SEQ_LENGTH = 2048
-# EPOCH_VALUES = [1, 2, 3, 4, 5]
-EPOCH_VALUES = [1]
-FINE_TUNE_COMMAND_DICT = {
-    "data_path": DEFAULT_HF_DATASET_PATH,
-    "project_name": str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
-    "text_column": "text",
-    "target_column": "label",
-    "train_split": "train",
-    "lr": 1e-5,
-    "auto_find_batch_size": True,
-    "seed": 12,
-    "max_seq_length": DEFAULT_MODEL_MAX_SEQ_LENGTH,
-    "logging_steps": 10,
-}
+EPOCH_VALUES = [2, 3, 4]
+# EPOCH_VALUES = [1]
 
 # Evaluation storage path
 EVAL_STORAGE_PATH = _CURRENT_DIR / "exp-model-eval-results"
@@ -158,10 +150,6 @@ def run(
 ) -> None:
     print("Starting experimental run for SoftSearch...")
 
-    # Load environment variables
-    load_dotenv()
-    FINE_TUNE_COMMAND_DICT["token"] = os.environ["HF_AUTH_TOKEN"]
-
     # Delete prior results and then remake
     shutil.rmtree(EVAL_STORAGE_PATH, ignore_errors=True)
     EVAL_STORAGE_PATH.mkdir(exist_ok=True)
@@ -178,8 +166,6 @@ def run(
 
     # Load data
     full_set = load_soft_search_2025_training_dataset()
-
-    full_set = full_set.sample(500)
 
     # Rename column from "software_produced" to "label"
     full_set = full_set.rename(columns={"software_produced": "label"})
@@ -216,6 +202,12 @@ def run(
     num_classes = full_set["label"].nunique()
     class_labels = list(full_set["label"].unique())
 
+    # Construct label to id and vice-versa LUTs
+    label2id, id2label = {}, {}
+    for i, label in enumerate(class_labels):
+        label2id[label] = str(i)
+        id2label[str(i)] = label
+
     # Construct features for the dataset
     features = datasets.Features(
         grant_id=datasets.Value("string"),
@@ -235,26 +227,6 @@ def run(
         test_size=0.2,
         random_state=12,
         stratify=full_set["stratify_group"],
-    )
-
-    # Convert to datasets
-    train_dataset = datasets.Dataset.from_pandas(
-        train_df,
-        features=features,
-        preserve_index=False,
-    )
-    test_dataset = datasets.Dataset.from_pandas(
-        test_df,
-        features=features,
-        preserve_index=False,
-    )
-
-    # Store to dataset dict
-    ds_dict = datasets.DatasetDict(
-        {
-            "train": train_dataset,
-            "test": test_dataset,
-        }
     )
 
     # Create a dataframe where the rows are the different splits
@@ -292,16 +264,6 @@ def run(
     print("-" * 20)
     print()
 
-    # Push to hub
-    print("Pushing dataset to hub")
-    ds_dict.push_to_hub(
-        DEFAULT_HF_DATASET_PATH,
-        private=True,
-        token=os.environ["HF_AUTH_TOKEN"],
-    )
-    print()
-    print()
-
     results = []
     # Iter through epochs
     for epoch_val in tqdm(
@@ -324,15 +286,74 @@ def run(
             if DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH.exists():
                 shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
 
-            # Update the fine-tune command dict
-            this_iter_command_dict = FINE_TUNE_COMMAND_DICT.copy()
-            this_iter_command_dict["model"] = hf_model_path
-            this_iter_command_dict["epochs"] = epoch_val
+            # Tokenize the dataset
+            tokenizer = AutoTokenizer.from_pretrained(hf_model_path)
 
-            # Train the model
-            ft_train(
-                this_iter_command_dict,
+            def tokenize_function(
+                examples: dict[str, list[str]],
+                tokenizer: AutoTokenizer = tokenizer,
+            ) -> dict[str, list[int]]:
+                return tokenizer(
+                    examples["text"], padding="max_length", truncation=True
+                )
+
+            data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+            # Convert to datasets
+            train_dataset = datasets.Dataset.from_pandas(
+                train_df.copy(),
+                features=features,
+                preserve_index=False,
             )
+            test_dataset = datasets.Dataset.from_pandas(
+                test_df.copy(),
+                features=features,
+                preserve_index=False,
+            )
+
+            # Store to dataset dict
+            ds_dict = datasets.DatasetDict(
+                {
+                    "train": train_dataset,
+                    "test": test_dataset,
+                }
+            )
+
+            tokenized_ds_dict = ds_dict.map(tokenize_function, batched=True)
+
+            # Load base model
+            base_model = AutoModelForSequenceClassification.from_pretrained(
+                hf_model_path,
+                num_labels=num_classes,
+                label2id=label2id,
+                id2label=id2label,
+                ignore_mismatched_sizes=True,
+                trust_remote_code=True,
+            )
+
+            # Create Training Args and Trainer
+            training_args = TrainingArguments(
+                output_dir=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
+                overwrite_output_dir=True,
+                num_train_epochs=epoch_val,
+                learning_rate=1e-5,
+                logging_steps=10,
+                auto_find_batch_size=True,
+                seed=12,
+            )
+            trainer = Trainer(
+                model=base_model,
+                args=training_args,
+                train_dataset=tokenized_ds_dict["train"],
+                tokenizer=tokenizer,
+                data_collator=data_collator,
+            )
+
+            print("Training model...")
+
+            # Train
+            trainer.train()
+            trainer.save_model(str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH))
 
             # Find device
             device = find_device()
@@ -344,7 +365,6 @@ def run(
                 tokenizer=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
                 padding=True,
                 truncation=True,
-                max_length=DEFAULT_MODEL_MAX_SEQ_LENGTH,
                 device=device,
             )
 
@@ -358,25 +378,25 @@ def run(
                 ).to_dict(),
             )
 
-        print()
+            print()
 
-        # Print results
-        results_df = pd.DataFrame(results)
-        results_df = results_df.sort_values(by="f1", ascending=False).reset_index(
-            drop=True
-        )
-        results_df.to_csv(results_output_path, index=False)
-        print("Current standings")
-        print(
-            tabulate(
-                results_df.head(10),
-                headers="keys",
-                tablefmt="psql",
-                showindex=False,
+            # Print results
+            results_df = pd.DataFrame(results)
+            results_df = results_df.sort_values(by="f1", ascending=False).reset_index(
+                drop=True
             )
-        )
+            results_df.to_csv(results_output_path, index=False)
+            print("Current standings")
+            print(
+                tabulate(
+                    results_df.head(10),
+                    headers="keys",
+                    tablefmt="psql",
+                    showindex=False,
+                )
+            )
 
-        print()
+            print()
 
     print()
     print("-" * 80)
