@@ -38,7 +38,7 @@ from .data import EXP_FILES_DIR, load_soft_search_2025_training_dataset
 # Models used for testing, both fine-tune and semantic logit
 BASE_MODELS = {
     "bert": "google-bert/bert-base-uncased",
-    # "deberta": "microsoft/deberta-v3-base",
+    "deberta": "microsoft/deberta-v3-base",
     # "modern-bert": "answerdotai/ModernBERT-base",
     # "nomic-bert": "nomic-ai/nomic-bert-2048",
     # "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
@@ -262,10 +262,10 @@ def _ft_eval(
 def run(  # noqa: C901
     results_output_path: Path = TRAINING_RESULTS_STORAGE_PATH,
     use_coiled: bool = False,
-    coiled_vm_type: str = "m6i.2xlarge",  # g5.xlarge
-    coiled_min_workers: int = 3,
-    coiled_max_workers: int = 4,
-    coiled_keepalive: str = "60 seconds",
+    coiled_vm_type: str = "g5.xlarge",
+    coiled_min_workers: int = 1,
+    coiled_max_workers: int = 1,
+    coiled_keepalive: str = "3 minutes",
 ) -> None:
     print("Starting experimental run for SoftSearch...")
 

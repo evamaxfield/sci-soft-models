@@ -27,10 +27,10 @@ def run_command(
     model: str,
     task: str,
     use_coiled: bool = False,
-    coiled_vm_type: str = "m6i.2xlarge",  # g5.xlarge
-    coiled_min_workers: int = 3,
-    coiled_max_workers: int = 4,
-    coiled_keepalive: str = "60 seconds",
+    coiled_vm_type: str = "g5.xlarge",
+    coiled_min_workers: int = 1,
+    coiled_max_workers: int = 1,
+    coiled_keepalive: str = "3 minutes",
 ) -> None:
     """Run a command."""
     # Normalize the model name
