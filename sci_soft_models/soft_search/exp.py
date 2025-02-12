@@ -39,7 +39,7 @@ from .data import EXP_FILES_DIR, load_soft_search_2025_training_dataset
 BASE_MODELS = {
     "bert": "google-bert/bert-base-uncased",
     "deberta": "microsoft/deberta-v3-base",
-    # "modern-bert": "answerdotai/ModernBERT-base",
+    "modern-bert": "answerdotai/ModernBERT-base",
     # "nomic-bert": "nomic-ai/nomic-bert-2048",
     # "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
 }
@@ -48,7 +48,6 @@ BASE_MODELS = {
 _CURRENT_DIR = Path(__file__).parent
 DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH = Path("autotrain-text-classification-temp/")
 EPOCH_VALUES = [1, 2, 3, 4]
-# EPOCH_VALUES = [1]
 
 # Evaluation storage path
 EVAL_STORAGE_PATH = _CURRENT_DIR / "exp-model-eval-results"
@@ -285,9 +284,6 @@ def run(  # noqa: C901
 
     # Load data
     full_set = load_soft_search_2025_training_dataset()
-
-    # Take sample
-    full_set = full_set.sample(frac=0.2, random_state=12)
 
     # Rename column from "software_produced" to "label"
     full_set = full_set.rename(columns={"software_produced": "label"})
