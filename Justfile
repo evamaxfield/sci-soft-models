@@ -48,16 +48,3 @@ tag-for-release version:
 # release a new version
 release:
 	git push --follow-tags
-
-###############################################################################
-# Coiled
-
-default_machine := "g5.xlarge"
-
-# run command on coiled with environment
-coiled-run cmd machine=default_machine:
-	just clean
-	coiled run \
-		--vm-type {{machine}} \
-		--region us-west-2 \
-		-- {{cmd}}

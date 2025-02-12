@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import random
 import shutil
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ import datasets
 import numpy as np
 import pandas as pd
 from dataclasses_json import DataClassJsonMixin
+from dotenv import load_dotenv
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     accuracy_score,
@@ -36,17 +38,16 @@ from .data import EXP_FILES_DIR, load_soft_search_2025_training_dataset
 # Models used for testing, both fine-tune and semantic logit
 BASE_MODELS = {
     "bert": "google-bert/bert-base-uncased",
-    "deberta": "microsoft/deberta-v3-base",
+    # "deberta": "microsoft/deberta-v3-base",
     # "modern-bert": "answerdotai/ModernBERT-base",
     # "nomic-bert": "nomic-ai/nomic-bert-2048",
     # "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
 }
 
 # Fine-tune default settings
-DEFAULT_HF_DATASET_PATH = "evamxb/soft-search-2025-training-dataset"
 _CURRENT_DIR = Path(__file__).parent
 DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH = Path("autotrain-text-classification-temp/")
-EPOCH_VALUES = [2, 3, 4]
+EPOCH_VALUES = [1, 2, 3, 4]
 # EPOCH_VALUES = [1]
 
 # Evaluation storage path
@@ -108,11 +109,11 @@ def evaluate(
 
     # Model short name
     this_model_eval_storage = eval_storage_path / model_name
-    this_model_eval_storage.mkdir(exist_ok=True)
+    this_model_eval_storage.mkdir(exist_ok=True, parents=True)
 
     # Epoch value
     this_model_eval_storage = this_model_eval_storage / f"epochs-{epoch_val}"
-    this_model_eval_storage.mkdir(exist_ok=True)
+    this_model_eval_storage.mkdir(exist_ok=True, parents=True)
 
     # Create confusion matrix display
     cm = ConfusionMatrixDisplay.from_predictions(
@@ -145,8 +146,126 @@ def evaluate(
     )
 
 
-def run(
+def _ft_eval(
+    model_short_name: str,
+    hf_model_path: str,
+    features: datasets.Features,
+    num_classes: int,
+    label2id: dict[str, str],
+    id2label: dict[str, str],
+    epoch_val: int,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+) -> EvaluationResults:
+    # Set seed
+    np.random.seed(12)
+    random.seed(12)
+
+    print(f"Fine-tuning model: {model_short_name}")
+    # Delete existing temp storage if exists
+    if DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH.exists():
+        shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
+
+    # Tokenize the dataset
+    tokenizer = AutoTokenizer.from_pretrained(hf_model_path)
+
+    def tokenize_function(
+        examples: dict[str, list[str]],
+        tokenizer: AutoTokenizer = tokenizer,
+    ) -> dict[str, list[int]]:
+        return tokenizer(
+            examples["text"],
+            padding="max_length",
+            truncation=True,
+        )
+
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+    # Convert to datasets
+    train_dataset = datasets.Dataset.from_pandas(
+        train_df.copy(),
+        features=features,
+        preserve_index=False,
+    )
+    test_dataset = datasets.Dataset.from_pandas(
+        test_df.copy(),
+        features=features,
+        preserve_index=False,
+    )
+
+    # Store to dataset dict
+    ds_dict = datasets.DatasetDict(
+        {
+            "train": train_dataset,
+            "test": test_dataset,
+        }
+    )
+
+    tokenized_ds_dict = ds_dict.map(tokenize_function, batched=True)
+
+    # Load base model
+    base_model = AutoModelForSequenceClassification.from_pretrained(
+        hf_model_path,
+        num_labels=num_classes,
+        label2id=label2id,
+        id2label=id2label,
+        ignore_mismatched_sizes=True,
+        trust_remote_code=True,
+    )
+
+    # Create Training Args and Trainer
+    training_args = TrainingArguments(
+        output_dir=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
+        overwrite_output_dir=True,
+        num_train_epochs=epoch_val,
+        learning_rate=1e-5,
+        logging_steps=10,
+        auto_find_batch_size=True,
+        seed=12,
+    )
+    trainer = Trainer(
+        model=base_model,
+        args=training_args,
+        train_dataset=tokenized_ds_dict["train"],
+        tokenizer=tokenizer,
+        data_collator=data_collator,
+    )
+
+    print("Training model...")
+
+    # Train
+    trainer.train()
+    trainer.save_model(str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH))
+
+    # Find device
+    device = find_device()
+
+    # Evaluate the model
+    ft_transformer_pipe = pipeline(
+        task="text-classification",
+        model=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
+        tokenizer=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
+        padding=True,
+        truncation=True,
+        device=device,
+    )
+
+    return evaluate(
+        model=ft_transformer_pipe,
+        test_df=test_df.copy(),
+        model_name=model_short_name,
+        epoch_val=epoch_val,
+        eval_storage_path=EVAL_STORAGE_PATH,
+    ).to_dict()
+
+
+def run(  # noqa: C901
     results_output_path: Path = TRAINING_RESULTS_STORAGE_PATH,
+    use_coiled: bool = False,
+    coiled_vm_type: str = "m6i.2xlarge",  # g5.xlarge
+    coiled_min_workers: int = 3,
+    coiled_max_workers: int = 4,
+    coiled_keepalive: str = "60 seconds",
 ) -> None:
     print("Starting experimental run for SoftSearch...")
 
@@ -166,6 +285,9 @@ def run(
 
     # Load data
     full_set = load_soft_search_2025_training_dataset()
+
+    # Take sample
+    full_set = full_set.sample(frac=0.2, random_state=12)
 
     # Rename column from "software_produced" to "label"
     full_set = full_set.rename(columns={"software_produced": "label"})
@@ -264,121 +386,95 @@ def run(
     print("-" * 20)
     print()
 
-    results = []
-    # Iter through epochs
-    for epoch_val in tqdm(
-        EPOCH_VALUES,
-        desc="Multiple Epochs Testing",
-        leave=False,
-    ):
-        # Set seed
-        np.random.seed(12)
-        random.seed(12)
+    # Handle coiled
+    if use_coiled:
+        import coiled
 
-        # Fine-tune from each base
-        for model_short_name, hf_model_path in tqdm(
-            BASE_MODELS.items(),
-            desc="Fine-tune models",
-            leave=False,
-        ):
-            print(f"Fine-tuning model: {model_short_name}")
-            # Delete existing temp storage if exists
-            if DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH.exists():
-                shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
+        # Load env
+        load_dotenv()
 
-            # Tokenize the dataset
-            tokenizer = AutoTokenizer.from_pretrained(hf_model_path)
+        # Get AWS_APPLICATION_TAG_KEY_VALUE variable
+        tags = {}
+        if "AWS_APPLICATION_TAG_KEY_VALUE" in os.environ:
+            key_and_value = os.environ["AWS_APPLICATION_TAG_KEY_VALUE"]
+            key, value = key_and_value.split("=")
+            tags[key] = value
+        else:
+            print("WARNING: AWS_APPLICATION_TAG_KEY_VALUE not found in env")
 
-            def tokenize_function(
-                examples: dict[str, list[str]],
-                tokenizer: AutoTokenizer = tokenizer,
-            ) -> dict[str, list[int]]:
-                return tokenizer(
-                    examples["text"], padding="max_length", truncation=True
-                )
+        # Check that AWS_PROFILE is set
+        if "AWS_PROFILE" in os.environ:
+            aws_profile = os.environ["AWS_PROFILE"]
+            print(f"Using AWS_PROFILE: {aws_profile}")
+        else:
+            print("WARNING: AWS_PROFILE not found in env, using default")
 
-            data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+        # Print coiled settings
+        print("Coiled settings:")
+        print(f"VM type: {coiled_vm_type}")
+        print(f"Min workers: {coiled_min_workers}")
+        print(f"Max workers: {coiled_max_workers}")
+        print(f"Keepalive: {coiled_keepalive}")
+        print()
 
-            # Convert to datasets
-            train_dataset = datasets.Dataset.from_pandas(
-                train_df.copy(),
+        @coiled.function(
+            name="fine-tune-eval-soft-search-exp",
+            vm_type=coiled_vm_type,
+            idle_timeout=coiled_keepalive,
+            tags=tags,
+            n_workers=[coiled_min_workers, coiled_max_workers],
+            spot_policy="on-demand",
+        )
+        def _wrapped_ft_eval(
+            model_short_name: str,
+            hf_model_path: str,
+            features: datasets.Features,
+            num_classes: int,
+            label2id: dict[str, str],
+            id2label: dict[str, str],
+            epoch_val: int,
+            train_df: pd.DataFrame,
+            test_df: pd.DataFrame,
+        ) -> dict:
+            return _ft_eval(
+                model_short_name=model_short_name,
+                hf_model_path=hf_model_path,
                 features=features,
-                preserve_index=False,
-            )
-            test_dataset = datasets.Dataset.from_pandas(
-                test_df.copy(),
-                features=features,
-                preserve_index=False,
-            )
-
-            # Store to dataset dict
-            ds_dict = datasets.DatasetDict(
-                {
-                    "train": train_dataset,
-                    "test": test_dataset,
-                }
-            )
-
-            tokenized_ds_dict = ds_dict.map(tokenize_function, batched=True)
-
-            # Load base model
-            base_model = AutoModelForSequenceClassification.from_pretrained(
-                hf_model_path,
-                num_labels=num_classes,
+                num_classes=num_classes,
                 label2id=label2id,
                 id2label=id2label,
-                ignore_mismatched_sizes=True,
-                trust_remote_code=True,
+                epoch_val=epoch_val,
+                train_df=train_df,
+                test_df=test_df,
             )
 
-            # Create Training Args and Trainer
-            training_args = TrainingArguments(
-                output_dir=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
-                overwrite_output_dir=True,
-                num_train_epochs=epoch_val,
-                learning_rate=1e-5,
-                logging_steps=10,
-                auto_find_batch_size=True,
-                seed=12,
-            )
-            trainer = Trainer(
-                model=base_model,
-                args=training_args,
-                train_dataset=tokenized_ds_dict["train"],
-                tokenizer=tokenizer,
-                data_collator=data_collator,
-            )
+        # Iter over epochs and models
+        futures = []
+        for epoch_val in EPOCH_VALUES:
+            for model_short_name, hf_model_path in BASE_MODELS.items():
+                futures.append(
+                    _wrapped_ft_eval.submit(
+                        model_short_name=model_short_name,
+                        hf_model_path=hf_model_path,
+                        features=features,
+                        num_classes=num_classes,
+                        label2id=label2id,
+                        id2label=id2label,
+                        epoch_val=epoch_val,
+                        train_df=train_df,
+                        test_df=test_df,
+                    )
+                )
 
-            print("Training model...")
-
-            # Train
-            trainer.train()
-            trainer.save_model(str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH))
-
-            # Find device
-            device = find_device()
-
-            # Evaluate the model
-            ft_transformer_pipe = pipeline(
-                task="text-classification",
-                model=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
-                tokenizer=str(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH),
-                padding=True,
-                truncation=True,
-                device=device,
-            )
-
-            results.append(
-                evaluate(
-                    model=ft_transformer_pipe,
-                    test_df=test_df.copy(),
-                    model_name=model_short_name,
-                    epoch_val=epoch_val,
-                    eval_storage_path=EVAL_STORAGE_PATH,
-                ).to_dict(),
-            )
-
-            print()
+        # Get results
+        results = []
+        for future in tqdm(
+            futures,
+            desc="Fine-tuning and evaluation futures",
+            leave=False,
+            total=len(BASE_MODELS) * len(EPOCH_VALUES),
+        ):
+            results.append(future.result())
 
             # Print results
             results_df = pd.DataFrame(results)
@@ -397,6 +493,53 @@ def run(
             )
 
             print()
+
+    # Otherwise use normal function
+    else:
+        results = []
+        for epoch_val in tqdm(
+            EPOCH_VALUES,
+            desc="Multiple Epochs Testing",
+            leave=False,
+        ):
+            # Fine-tune from each base
+            for model_short_name, hf_model_path in tqdm(
+                BASE_MODELS.items(),
+                desc="Fine-tune models",
+                leave=False,
+            ):
+                eval_res = _ft_eval(
+                    model_short_name=model_short_name,
+                    hf_model_path=hf_model_path,
+                    features=features,
+                    num_classes=num_classes,
+                    label2id=label2id,
+                    id2label=id2label,
+                    epoch_val=epoch_val,
+                    train_df=train_df,
+                    test_df=test_df,
+                )
+
+                # Append to results
+                results.append(eval_res)
+
+                # Print results
+                results_df = pd.DataFrame(results)
+                results_df = results_df.sort_values(
+                    by="f1", ascending=False
+                ).reset_index(drop=True)
+                results_df.to_csv(results_output_path, index=False)
+                print("Current standings")
+                print(
+                    tabulate(
+                        results_df.head(10),
+                        headers="keys",
+                        tablefmt="psql",
+                        showindex=False,
+                    )
+                )
+
+                print()
 
     print()
     print("-" * 80)

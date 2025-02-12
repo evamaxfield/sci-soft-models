@@ -5,6 +5,7 @@ import os
 import random
 import shutil
 from pathlib import Path
+from typing import Any
 
 import datasets
 import numpy as np
@@ -43,6 +44,7 @@ def run(
     model_eval_outputs_dir: Path = FINAL_MODEL_TRAINING_DATA_DIR,
     confusion_matrix_save_name: str = "dev-author-em-confusion-matrix.png",
     misclassifications_save_name: str = "dev-author-em-misclassifications.csv",
+    **kwargs: Any,
 ) -> None:
     # Load env
     load_dotenv()

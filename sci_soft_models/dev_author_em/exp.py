@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
+from typing import Any
 
 import datasets
 import numpy as np
@@ -203,6 +204,7 @@ def evaluate(
 
 def run(  # noqa: C901
     results_output_path: Path = TRAINING_RESULTS_STORAGE_PATH,
+    **kwargs: Any,
 ) -> None:
     # Load environment variables
     load_dotenv()

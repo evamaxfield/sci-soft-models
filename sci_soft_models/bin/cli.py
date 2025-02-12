@@ -26,6 +26,11 @@ IGNORE_MODULES = [
 def run_command(
     model: str,
     task: str,
+    use_coiled: bool = False,
+    coiled_vm_type: str = "m6i.2xlarge",  # g5.xlarge
+    coiled_min_workers: int = 3,
+    coiled_max_workers: int = 4,
+    coiled_keepalive: str = "60 seconds",
 ) -> None:
     """Run a command."""
     # Normalize the model name
@@ -67,7 +72,13 @@ def run_command(
 
     # Run the task
     print(f"Running sci_soft_models.{model}.{task}...")
-    task_module.run()
+    task_module.run(
+        use_coiled=use_coiled,
+        coiled_vm_type=coiled_vm_type,
+        coiled_min_workers=coiled_min_workers,
+        coiled_max_workers=coiled_max_workers,
+        coiled_keepalive=coiled_keepalive,
+    )
 
 
 ###############################################################################
