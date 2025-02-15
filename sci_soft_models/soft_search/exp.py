@@ -9,7 +9,6 @@ from pathlib import Path
 import datasets
 import numpy as np
 import pandas as pd
-import torch
 from dataclasses_json import DataClassJsonMixin
 from distributed import as_completed
 from dotenv import load_dotenv
@@ -42,7 +41,6 @@ BASE_MODELS = {
     "bert": "google-bert/bert-base-uncased",
     "deberta": "microsoft/deberta-v3-base",
     "modern-bert": "answerdotai/ModernBERT-base",
-    "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
 }
 
 # Fine-tune default settings
@@ -166,7 +164,7 @@ def _ft_eval(
     if DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH.exists():
         shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
 
-    # Tokenize the dataset
+    # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(hf_model_path, trust_remote_code=True)
 
     def tokenize_function(
@@ -211,7 +209,6 @@ def _ft_eval(
         id2label=id2label,
         ignore_mismatched_sizes=True,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
     )
 
     # Create Training Args and Trainer
@@ -251,7 +248,6 @@ def _ft_eval(
         truncation=True,
         device=device,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
     )
 
     return evaluate(
@@ -421,8 +417,7 @@ def run(  # noqa: C901
         # Get coiled cluster
         with coiled.Cluster(
             name="fine-tune-eval-soft-search-exp",
-            scheduler_vm_types=[coiled_vm_type],
-            scheduler_disk_size=48,
+            scheduler_vm_types=["g4dn.xlarge"],
             worker_vm_types=[coiled_vm_type],
             n_workers=[coiled_min_workers, coiled_max_workers],
             worker_disk_size=48,

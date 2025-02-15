@@ -59,6 +59,7 @@ test = [
 ]
 training = [
   "datasets>=2,<3",
+  "einops>=0.8,<0.9",
   "matplotlib>=3,<4",
   "scikit-learn>=1,<2",
   "python-dotenv==1.0.1",
