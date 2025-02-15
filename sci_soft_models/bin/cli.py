@@ -27,10 +27,10 @@ def run_command(
     model: str,
     task: str,
     use_coiled: bool = False,
-    coiled_vm_type: str = "g5.xlarge",
-    coiled_min_workers: int = 1,
-    coiled_max_workers: int = 1,
-    coiled_keepalive: str = "3 minutes",
+    coiled_vm_type: str = "",
+    coiled_min_workers: int = -1,
+    coiled_max_workers: int = -1,
+    coiled_keepalive: str = "",
 ) -> None:
     """Run a command."""
     # Normalize the model name
@@ -70,14 +70,24 @@ def run_command(
     # Import the task
     task_module = importlib.import_module(f"sci_soft_models.{model}.{task}")
 
+    # Handle coiled kwargs
+    coiled_kwargs: dict[str, int | str] = {}
+    for key, value in {
+        "coiled_vm_type": coiled_vm_type,
+        "coiled_min_workers": coiled_min_workers,
+        "coiled_max_workers": coiled_max_workers,
+        "coiled_keepalive": coiled_keepalive,
+    }.items():
+        if isinstance(value, str) and value != "":
+            coiled_kwargs[key] = value
+        elif isinstance(value, int) and value > 0:
+            coiled_kwargs[key] = value
+
     # Run the task
     print(f"Running sci_soft_models.{model}.{task}...")
     task_module.run(
         use_coiled=use_coiled,
-        coiled_vm_type=coiled_vm_type,
-        coiled_min_workers=coiled_min_workers,
-        coiled_max_workers=coiled_max_workers,
-        coiled_keepalive=coiled_keepalive,
+        **coiled_kwargs,
     )
 
 

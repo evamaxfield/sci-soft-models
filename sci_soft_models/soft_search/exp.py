@@ -9,7 +9,9 @@ from pathlib import Path
 import datasets
 import numpy as np
 import pandas as pd
+import torch
 from dataclasses_json import DataClassJsonMixin
+from distributed import as_completed
 from dotenv import load_dotenv
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
@@ -40,8 +42,7 @@ BASE_MODELS = {
     "bert": "google-bert/bert-base-uncased",
     "deberta": "microsoft/deberta-v3-base",
     "modern-bert": "answerdotai/ModernBERT-base",
-    # "nomic-bert": "nomic-ai/nomic-bert-2048",
-    # "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
+    "gte-mlm-base": "Alibaba-NLP/gte-en-mlm-base",
 }
 
 # Fine-tune default settings
@@ -166,7 +167,7 @@ def _ft_eval(
         shutil.rmtree(DEFAULT_FINE_TUNE_TEMP_STORAGE_PATH)
 
     # Tokenize the dataset
-    tokenizer = AutoTokenizer.from_pretrained(hf_model_path)
+    tokenizer = AutoTokenizer.from_pretrained(hf_model_path, trust_remote_code=True)
 
     def tokenize_function(
         examples: dict[str, list[str]],
@@ -210,6 +211,7 @@ def _ft_eval(
         id2label=id2label,
         ignore_mismatched_sizes=True,
         trust_remote_code=True,
+        torch_dtype=torch.bfloat16,
     )
 
     # Create Training Args and Trainer
@@ -221,6 +223,7 @@ def _ft_eval(
         logging_steps=10,
         auto_find_batch_size=True,
         seed=12,
+        save_strategy="no",
     )
     trainer = Trainer(
         model=base_model,
@@ -247,6 +250,8 @@ def _ft_eval(
         padding=True,
         truncation=True,
         device=device,
+        trust_remote_code=True,
+        torch_dtype=torch.bfloat16,
     )
 
     return evaluate(
@@ -263,7 +268,7 @@ def run(  # noqa: C901
     use_coiled: bool = False,
     coiled_vm_type: str = "g5.xlarge",
     coiled_min_workers: int = 1,
-    coiled_max_workers: int = 1,
+    coiled_max_workers: int = 4,
     coiled_keepalive: str = "3 minutes",
 ) -> None:
     print("Starting experimental run for SoftSearch...")
@@ -413,82 +418,68 @@ def run(  # noqa: C901
         print(f"Keepalive: {coiled_keepalive}")
         print()
 
-        @coiled.function(
+        # Get coiled cluster
+        with coiled.Cluster(
             name="fine-tune-eval-soft-search-exp",
-            vm_type=coiled_vm_type,
+            scheduler_vm_types=[coiled_vm_type],
+            scheduler_disk_size=48,
+            worker_vm_types=[coiled_vm_type],
+            n_workers=[coiled_min_workers, coiled_max_workers],
+            worker_disk_size=48,
+            worker_options={"nthreads": 1},
             idle_timeout=coiled_keepalive,
             tags=tags,
-            n_workers=[coiled_min_workers, coiled_max_workers],
             spot_policy="on-demand",
-        )
-        def _wrapped_ft_eval(
-            model_short_name: str,
-            hf_model_path: str,
-            features: datasets.Features,
-            num_classes: int,
-            label2id: dict[str, str],
-            id2label: dict[str, str],
-            epoch_val: int,
-            train_df: pd.DataFrame,
-            test_df: pd.DataFrame,
-        ) -> dict:
-            return _ft_eval(
-                model_short_name=model_short_name,
-                hf_model_path=hf_model_path,
-                features=features,
-                num_classes=num_classes,
-                label2id=label2id,
-                id2label=id2label,
-                epoch_val=epoch_val,
-                train_df=train_df,
-                test_df=test_df,
-            )
+        ) as cluster:
+            # Get client
+            client = cluster.get_client()
 
-        # Iter over epochs and models
-        futures = []
-        for epoch_val in EPOCH_VALUES:
-            for model_short_name, hf_model_path in BASE_MODELS.items():
-                futures.append(
-                    _wrapped_ft_eval.submit(
-                        model_short_name=model_short_name,
-                        hf_model_path=hf_model_path,
-                        features=features,
-                        num_classes=num_classes,
-                        label2id=label2id,
-                        id2label=id2label,
-                        epoch_val=epoch_val,
-                        train_df=train_df,
-                        test_df=test_df,
+            # Iter over epochs and models
+            futures = []
+            for epoch_val in EPOCH_VALUES:
+                for model_short_name, hf_model_path in BASE_MODELS.items():
+                    futures.append(
+                        client.submit(
+                            _ft_eval,
+                            model_short_name=model_short_name,
+                            hf_model_path=hf_model_path,
+                            features=features,
+                            num_classes=num_classes,
+                            label2id=label2id,
+                            id2label=id2label,
+                            epoch_val=epoch_val,
+                            train_df=train_df,
+                            test_df=test_df,
+                        )
+                    )
+
+            # Get results
+            results = []
+            for _, result in tqdm(
+                as_completed(futures, with_results=True),
+                desc="Fine-tuning and evaluation futures",
+                leave=False,
+                total=len(BASE_MODELS) * len(EPOCH_VALUES),
+            ):
+                results.append(result)
+
+                # Print results
+                results_df = pd.DataFrame(results)
+                results_df = results_df.sort_values(
+                    by="f1", ascending=False
+                ).reset_index(drop=True)
+                results_df.to_csv(results_output_path, index=False)
+                print("Current standings")
+                print(
+                    tabulate(
+                        results_df.head(10),
+                        headers="keys",
+                        tablefmt="psql",
+                        showindex=False,
                     )
                 )
 
-        # Get results
-        results = []
-        for future in tqdm(
-            futures,
-            desc="Fine-tuning and evaluation futures",
-            leave=False,
-            total=len(BASE_MODELS) * len(EPOCH_VALUES),
-        ):
-            results.append(future.result())
-
-            # Print results
-            results_df = pd.DataFrame(results)
-            results_df = results_df.sort_values(by="f1", ascending=False).reset_index(
-                drop=True
-            )
-            results_df.to_csv(results_output_path, index=False)
-            print("Current standings")
-            print(
-                tabulate(
-                    results_df.head(10),
-                    headers="keys",
-                    tablefmt="psql",
-                    showindex=False,
-                )
-            )
-
-            print()
+                print()
 
     # Otherwise use normal function
     else:
