@@ -436,6 +436,7 @@ def run(  # noqa: C901
                     futures.append(
                         client.submit(
                             _ft_eval,
+                            key=f"ft-eval-{model_short_name}-{epoch_val}",
                             model_short_name=model_short_name,
                             hf_model_path=hf_model_path,
                             features=features,
