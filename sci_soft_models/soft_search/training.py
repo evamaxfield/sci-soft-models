@@ -190,7 +190,7 @@ def run(
     ###############################################################################
 
     # Load data
-    full_set = load_soft_search_2025_training_dataset().sample(frac=0.05)
+    full_set = load_soft_search_2025_training_dataset()
 
     # Rename column from "software_produced" to "label"
     full_set = full_set.rename(columns={"software_produced": "label"})
@@ -428,7 +428,9 @@ def run(
         )
 
     # Store directorate results to CSV
-    directorate_results_df = pd.DataFrame(directorate_results)
+    directorate_results_df = pd.DataFrame(directorate_results).sort_values(
+        by="f1", ascending=False
+    )
     directorate_results_save_path = model_eval_outputs_dir / "directorate-results.csv"
     directorate_results_df.to_csv(directorate_results_save_path, index=False)
     print("Directorate results:")
