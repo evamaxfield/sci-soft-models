@@ -17,6 +17,7 @@ from tqdm import tqdm
 DATA_FILES_DIR = Path(__file__).parent / "files"
 
 EXP_FILES_DIR = DATA_FILES_DIR / "experiments"
+FINAL_MODEL_TRAINING_DATA_DIR = DATA_FILES_DIR / "final-model-training-data"
 
 SOFT_SEARCH_TRAINING_2022_PATH = DATA_FILES_DIR / "soft-search-training-2022.parquet"
 EAGER_SOFT_SUST_SURVEY_DATASET_PATH = DATA_FILES_DIR / "eager-soft-sust-survey.parquet"
