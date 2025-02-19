@@ -10,7 +10,6 @@ from typing import Any
 import datasets
 import numpy as np
 import pandas as pd
-from distributed import as_completed
 from dotenv import load_dotenv
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
@@ -18,8 +17,6 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 from sklearn.model_selection import train_test_split
-from tabulate import tabulate
-from tqdm import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -158,11 +155,10 @@ def _ft_pred_test(
     return test_df
 
 
-def run(  # noqa: C901
-    # base_model_name: str = "answerdotai/ModernBERT-base",
-    base_model_name: str = "google-bert/bert-base-uncased",
+def run(
+    base_model_name: str = "answerdotai/ModernBERT-base",
     num_training_epochs: int = 2,
-    test_size: float = 0.2,
+    test_size: float = 0.6,
     trained_model_name: str = TRAINED_UPLOADED_MODEL_NAME,
     model_eval_outputs_dir: Path = FINAL_MODEL_TRAINING_DATA_DIR,
     confusion_matrix_save_name: str = "nsf-soft-search-v2-confusion-matrix.png",
@@ -187,14 +183,14 @@ def run(  # noqa: C901
     # Check that HF_AUTH_TOKEN is set
     if "HF_AUTH_TOKEN" not in os.environ:
         raise OSError("HF_AUTH_TOKEN is not set in the environment")
-    
+
     # Get HF token
     hf_token = os.environ["HF_AUTH_TOKEN"]
 
     ###############################################################################
 
     # Load data
-    full_set = load_soft_search_2025_training_dataset().sample(frac=0.2)
+    full_set = load_soft_search_2025_training_dataset().sample(frac=0.05)
 
     # Rename column from "software_produced" to "label"
     full_set = full_set.rename(columns={"software_produced": "label"})
@@ -352,7 +348,7 @@ def run(  # noqa: C901
                 test_df=test_df,
                 hf_token=hf_token,
             )
-        
+
         selected_ft_pred_func = _ft_pred_test_coiled
 
     # Run locally
@@ -399,9 +395,45 @@ def run(  # noqa: C901
         "recall": recall,
         "f1": f1,
     }
-    results_save_path = model_eval_outputs_dir / "results.json"
+    results_save_path = model_eval_outputs_dir / "overall-results.json"
     with open(results_save_path, "w") as open_f:
         json.dump(results, open_f)
+
+    # Iter over reduced_directorate and get accuracy, precision, recall, f1
+    directorate_results = []
+    for reduced_directorate in predicted_values_after_ft[
+        "reduced_directorate"
+    ].unique():
+        reduced_directorate_df = predicted_values_after_ft[
+            predicted_values_after_ft["reduced_directorate"] == reduced_directorate
+        ]
+        dir_accuracy = accuracy_score(
+            reduced_directorate_df["label"].tolist(),
+            reduced_directorate_df["predicted_label"].tolist(),
+        )
+        dir_precision, dir_recall, dir_f1, _ = precision_recall_fscore_support(
+            reduced_directorate_df["label"].tolist(),
+            reduced_directorate_df["predicted_label"].tolist(),
+            average="macro",
+        )
+        directorate_results.append(
+            {
+                "reduced_directorate": reduced_directorate,
+                "accuracy": dir_accuracy,
+                "precision": dir_precision,
+                "recall": dir_recall,
+                "f1": dir_f1,
+                "count": len(reduced_directorate_df),
+            }
+        )
+
+    # Store directorate results to CSV
+    directorate_results_df = pd.DataFrame(directorate_results)
+    directorate_results_save_path = model_eval_outputs_dir / "directorate-results.csv"
+    directorate_results_df.to_csv(directorate_results_save_path, index=False)
+    print("Directorate results:")
+    print(directorate_results_df)
+    print()
 
     # Create confusion matrix and ROC curve
     confusion_matrix = ConfusionMatrixDisplay.from_predictions(
@@ -413,7 +445,8 @@ def run(  # noqa: C901
 
     # Store misclassifications
     misclassifications = predicted_values_after_ft.loc[
-        predicted_values_after_ft["label"] != predicted_values_after_ft["predicted_label"]
+        predicted_values_after_ft["label"]
+        != predicted_values_after_ft["predicted_label"]
     ]
     misclassifications_save_path = model_eval_outputs_dir / misclassifications_save_name
     misclassifications.to_csv(misclassifications_save_path, index=False)
