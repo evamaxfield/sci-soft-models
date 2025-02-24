@@ -158,7 +158,7 @@ def _ft_pred_test(
 def run(
     base_model_name: str = "answerdotai/ModernBERT-base",
     num_training_epochs: int = 2,
-    test_size: float = 0.6,
+    test_size: float = 0.2,
     trained_model_name: str = TRAINED_UPLOADED_MODEL_NAME,
     model_eval_outputs_dir: Path = FINAL_MODEL_TRAINING_DATA_DIR,
     confusion_matrix_save_name: str = "nsf-soft-search-v2-confusion-matrix.png",
