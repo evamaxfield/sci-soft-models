@@ -27,7 +27,7 @@ clean:
 # install with all deps
 install:
 	pip install uv
-	uv pip install -e ".[dev,lint,test,training,coiled]"
+	uv pip install -e ".[dev,lint,test,training,coiled,data]"
 
 # lint, format, and check all files
 lint:
