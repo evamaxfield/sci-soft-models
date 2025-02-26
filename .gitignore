@@ -133,7 +133,7 @@ autotrain-text-classification-temp/
 dev-author-em-clf/
 all-model-results.csv
 nsf-soft-search-v2/
-annotated-dev-author-em-resolved.csv
-final-model-training-data/test-set.parquet
-final-model-training-data/train-set.parquet
-final-model-training-data/dev-author-em-misclassifications.csv
+sci_soft_models/dev_author_em/data/files/annotated-dev-author-em-resolved.csv
+sci_soft_models/dev_author_em/data/files/final-model-training-data/test-set.parquet
+sci_soft_models/dev_author_em/data/files/final-model-training-data/train-set.parquet
+sci_soft_models/dev_author_em/data/files/final-model-training-data/dev-author-em-misclassifications.csv
