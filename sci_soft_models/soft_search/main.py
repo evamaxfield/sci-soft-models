@@ -12,6 +12,7 @@ from .constants import MODEL_STR_INPUT_TEMPLATE, TRAINED_UPLOADED_MODEL_NAME
 
 ###############################################################################
 
+
 @dataclass
 class AwardDetails(DataClassJsonMixin):
     id_: str
@@ -19,11 +20,13 @@ class AwardDetails(DataClassJsonMixin):
     abstract: str
     outcomes_report: str | None
 
+
 @dataclass
 class AwardDetailsWithSoftwareProductionPrediction(DataClassJsonMixin):
     award_details: AwardDetails
     software_production_prediction: str
     confidence: float
+
 
 ###############################################################################
 
@@ -38,7 +41,6 @@ def get_model_details() -> ModelDetails:
         The name and version of the model.
     """
     return ModelDetails(name=__name__, version=__version__)
-
 
 
 def load_nsf_soft_search_v2(use_available_device: bool | str = True) -> Pipeline:
@@ -97,11 +99,11 @@ def predict_software_production_from_awards(
     # Prepare the inputs
     inputs: list[dict[str, str | AwardDetails]] = []
     for award in awards:
-        input_ = {
+        input_: dict[str, str | AwardDetails] = {
             "text": MODEL_STR_INPUT_TEMPLATE.format(
-                title=award.title,
-                abstract=award.abstract,
-                outcomes_report=str(award.outcomes_report),
+                award_title=award.title,
+                award_abstract=award.abstract,
+                award_outcomes=str(award.outcomes_report),
             ),
             "award_details": award,
         }
