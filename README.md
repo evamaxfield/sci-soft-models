@@ -1,4 +1,4 @@
-# Scientific Software (Predictive) Models
+# Predictive Models for Researching Scientific Software
 
 Computational predictive models to assist in the identification, classification, and study of scientific software.
 
