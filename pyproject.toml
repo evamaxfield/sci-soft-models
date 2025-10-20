@@ -55,7 +55,7 @@ dev = [
   "jupyterlab",
 ]
 data = [
-  "dvuploader @ https://github.com/evamaxfield/python-dvuploader.git",
+  "dvuploader>=0.3.0",
   "easyDataverse>=0.4,<0.5",
 ]
 test = [
