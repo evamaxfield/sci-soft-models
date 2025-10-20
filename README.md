@@ -1,5 +1,7 @@
 # Predictive Models for Researching Scientific Software
 
+[![DOI](https://zenodo.org/badge/859656122.svg)](https://doi.org/10.5281/zenodo.17401862)
+
 Computational predictive models to assist in the identification, classification, and study of scientific software.
 
 ## Models
